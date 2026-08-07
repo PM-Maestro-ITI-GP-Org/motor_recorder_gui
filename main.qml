@@ -471,21 +471,26 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 spacing: 6
 
-                Rectangle {
+                TextField {
+                    id: pathEdit
                     Layout.fillWidth: true
                     Layout.preferredHeight: 28
-                    color: "#0d1117"
-                    radius: 4
-                    border.color: "#30363d"
-                    clip: true
-
-                    Text {
-                        anchors.left: parent.left; anchors.leftMargin: 6
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: folderDialog.currentFolder.toString().replace("file://", "")
-                        color: "#e6edf3"; font.pixelSize: 11
-                        elide: Text.ElideLeft
-                        width: parent.width - 12
+                    text: folderDialog.currentFolder.toString().replace("file://", "")
+                    color: "#e6edf3"
+                    font.pixelSize: 11
+                    selectByMouse: true
+                    leftPadding: 6
+                    verticalAlignment: Text.AlignVCenter
+                    placeholderText: "/path/to/folder"
+                    placeholderTextColor: "#8b949e"
+                    background: Rectangle { color: "#0d1117"; radius: 4; border.color: "#30363d"; border.width: 1 }
+                    onAccepted: {
+                        var p = text.trim()
+                        if (p === "") return
+                        var u = p
+                        if (!u.startsWith("file://")) u = "file://" + u
+                        if (!u.endsWith("/")) u += "/"
+                        folderDialog.currentFolder = u
                     }
                 }
 
