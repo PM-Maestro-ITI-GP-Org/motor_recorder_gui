@@ -209,13 +209,13 @@ ApplicationWindow {
         if (idx < 0 || idx >= graphFilesModel.count) return
         var item = graphFilesModel.get(idx)
         if (item.source === "downloaded") {
-            // Load from downloaded files
+            // Load from downloaded files (stored as raw text — parse into rows)
             var data = downloadedFilesModel.get(item.index).csvData
-            csvData = data
+            parseDownloadedCSV(data)
             graphStartRow = 0
-            graphEndRow = csvData.length
+            graphEndRow = csvTotalRows
             graphStartField.text = "0"
-            graphEndField.text = csvData.length > 0 ? (csvData.length - 1) : "0"
+            graphEndField.text = csvTotalRows > 0 ? (csvTotalRows - 1).toString() : "0"
             chartCanvas.requestPaint()
         } else if (item.source === "local") {
             // Load from local file
@@ -233,30 +233,41 @@ ApplicationWindow {
         }
         csvData = []
         var lines = text.split('\n')
-        var headerParsed = false
-        for (var i = 0; i < lines.length; ++i) {
-            var line = lines[i].trim()
-            if (line === "") continue
-            var cols = line.split(',')
-            if (!headerParsed) {
-                csvHeader = cols.slice()
-                csvColumns = cols.slice()
-                initColumnStates()
-                headerParsed = true
-                continue
-            }
-            if (cols.length >= csvColumns.length)
-                csvData.push(cols)
-        }
-        if (csvData.length === 0) {
+        if (lines.length < 2) {
             logAppend("No valid data rows in: " + filePath, "warning")
             return
         }
+        var headerCols = lines[0].split(',')
+        csvHeader = headerCols.slice()
+        var friendly = []
+        for (var k = 0; k < headerCols.length; ++k)
+            friendly.push(friendlyColumnName(headerCols[k]))
+        csvColumns = friendly
+        initColumnStates()
+        var nCols = csvColumns.length
+        var dataCount = 0
+        var step = Math.max(1, Math.floor((lines.length - 1) / maxPlotRows))
+        for (var i = 1; i < lines.length; ++i) {
+            var line = lines[i].trim()
+            if (line === "") continue
+            dataCount++
+            if ((dataCount - 1) % step !== 0) continue
+            var cols = line.split(',')
+            if (cols.length >= nCols)
+                csvData.push(cols)
+        }
+        if (dataCount === 0) {
+            logAppend("No valid data rows in: " + filePath, "warning")
+            return
+        }
+        csvTotalRows = dataCount
+        csvStep = step
         graphStartRow = 0
-        graphEndRow = csvData.length
+        graphEndRow = csvTotalRows
         graphStartField.text = "0"
-        graphEndField.text = csvData.length > 0 ? (csvData.length - 1) : "0"
-        logAppend("Loaded " + csvData.length + " rows from " + filePath, "success")
+        graphEndField.text = csvTotalRows > 0 ? (csvTotalRows - 1).toString() : "0"
+        logAppend("Loaded " + dataCount + " rows from " + filePath +
+                  (step > 1 ? " (downsampled to " + csvData.length + ")" : ""), "success")
         chartCanvas.requestPaint()
     }
 
@@ -346,7 +357,6 @@ ApplicationWindow {
     function stopAll() {
         recTimerRunning = false
         recordingSecs = 0
-        recTimerText.text = ""
         fileListLoading = false
         downloadQueue = []
         downloadQueueActive = false
@@ -611,9 +621,26 @@ ApplicationWindow {
     property var csvData: []
     property var csvHeader: []
     property var csvColumns: []
-    property var traceColors: ["#ff7b72","#d2a8ff","#79c0ff","#a5d6ff","#ffa657","#c9d1d9","#7ee787","#f0883e","#d2a8ff","#79c0ff","#ff7b72","#3fb950","#58a6ff"]
+    property var traceColors: ["#888888","#ff0000","#0066ff","#ffd500","#00cc00","#ff00ff","#00cccc","#ff8c00","#9900ff","#ff3399","#00b8a8","#b3ff00","#e6e6e6"]
     property var checkedColumns: []
     property int graphMaxPoints: 2000
+    property int maxPlotRows: 4000
+    property int csvTotalRows: 0
+    property int csvStep: 1
+
+    function friendlyColumnName(name) {
+        var map = {
+            "current_0": "Current_0",
+            "current_1": "Current_1",
+            "current_2": "Current_2",
+            "current_3": "Speed_volt_cmd",
+            "current_4": "Volt_0",
+            "current_5": "Volt_1",
+            "current_6": "Volt_2",
+            "current_7": "DC_bus_volt"
+        }
+        return map[name] !== undefined ? map[name] : name
+    }
 
     function initColumnStates() {
         var n = csvColumns.length
@@ -627,15 +654,28 @@ ApplicationWindow {
 
     function parseDownloadedCSV(raw) {
         var lines = raw.trim().split('\n')
-        if (lines.length < 1) { csvData = []; return }
-        csvHeader = lines[0].split(',')
-        csvColumns = csvHeader.slice()
+        if (lines.length < 2) { csvData = []; csvTotalRows = 0; csvStep = 1; return }
+        var headerCols = lines[0].split(',')
+        csvHeader = headerCols.slice()
+        var friendly = []
+        for (var k = 0; k < headerCols.length; ++k)
+            friendly.push(friendlyColumnName(headerCols[k]))
+        csvColumns = friendly
         initColumnStates()
+        var nCols = csvColumns.length
         var rows = []
+        var dataCount = 0
+        var step = Math.max(1, Math.floor((lines.length - 1) / maxPlotRows))
         for (var i = 1; i < lines.length; i++) {
-            var cols = lines[i].split(',')
-            if (cols.length >= csvColumns.length) rows.push(cols)
+            var line = lines[i].trim()
+            if (line === "") continue
+            dataCount++
+            if ((dataCount - 1) % step !== 0) continue
+            var cols = line.split(',')
+            if (cols.length >= nCols) rows.push(cols)
         }
+        csvTotalRows = dataCount
+        csvStep = step
         csvData = rows
     }
 
@@ -645,9 +685,9 @@ ApplicationWindow {
         var data = downloadedFilesModel.get(idx).csvData
         parseDownloadedCSV(data)
         graphStartRow = 0
-        graphEndRow = csvData.length
+        graphEndRow = csvTotalRows
         graphStartField.text = "0"
-        graphEndField.text = csvData.length > 0 ? (csvData.length - 1) : "0"
+        graphEndField.text = csvTotalRows > 0 ? (csvTotalRows - 1).toString() : "0"
         chartCanvas.requestPaint()
     }
 
@@ -832,7 +872,7 @@ ApplicationWindow {
                 onClicked: {
                     mqtt.publishCommand("stop")
                     recTimerRunning = false
-                    recTimerText.text = ""
+                    recordingSecs = 0
                     startRemainingSecs = 0
                     autoStopTimer.stop()
                     enableButtons("stopped")
@@ -1178,8 +1218,8 @@ ApplicationWindow {
                             var s = parseInt(graphStartField.text)
                             var e = parseInt(graphEndField.text)
                             if (!isNaN(s) && s >= 0) graphStartRow = s
-                            if (!isNaN(e) && e > s && e < csvData.length) graphEndRow = e
-                            else graphEndRow = csvData.length
+                            if (!isNaN(e) && e > s && e < csvTotalRows) graphEndRow = e
+                            else graphEndRow = csvTotalRows
                             chartCanvas.requestPaint()
                         }
                         contentItem: Text { text: parent.text; color: "#e6edf3"; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: 11 }
@@ -1201,7 +1241,7 @@ ApplicationWindow {
                         id: chartCanvas
                         anchors.fill: parent
                         property real zoomMin: 0
-                        property real zoomMax: csvData.length > 0 ? csvData.length : 1
+                        property real zoomMax: csvTotalRows > 0 ? csvTotalRows : 1
 
                         onPaint: {
                             var ctx = getContext("2d")
@@ -1215,7 +1255,7 @@ ApplicationWindow {
 
                             var startRow = graphStartRow
                             var endRow = graphEndRow
-                            if (endRow <= startRow) { endRow = data.length; startRow = 0 }
+                            if (endRow <= startRow) { endRow = csvTotalRows > 0 ? csvTotalRows : data.length; startRow = 0 }
                             var visibleRange = endRow - startRow
                             if (visibleRange < 1) visibleRange = 1
 
@@ -1227,15 +1267,21 @@ ApplicationWindow {
                             var pH = Math.max(0, height - mT - mB)
 
                             var checked = checkedColumns
-                            var maxPts = graphMaxPoints
-                            var step = visibleRange > maxPts ? Math.floor(visibleRange / maxPts) : 1
+                            var maxPts = Math.max(200, Math.min(graphMaxPoints, Math.floor(width)))
+                            var sIdx = Math.floor(startRow / csvStep)
+                            var eIdx = Math.min(data.length, Math.ceil(endRow / csvStep))
+                            if (sIdx < 0) sIdx = 0
+                            if (eIdx > data.length) eIdx = data.length
+                            if (sIdx >= eIdx) sIdx = Math.max(0, eIdx - 1)
+                            var nSamples = eIdx - sIdx
+                            var plotStep = Math.max(1, Math.ceil(nSamples / maxPts))
                             var nCols = csvColumns.length > 0 ? csvColumns.length : Math.min(13, data[0].length)
 
                             var yMin = Infinity, yMax = -Infinity
-                            for (var ri = startRow; ri < endRow; ri += step) {
-                                for (var cj = 1; cj < Math.min(nCols, data[ri].length); cj++) {
+                            for (var si = sIdx; si < eIdx; si += plotStep) {
+                                for (var cj = 1; cj < Math.min(nCols, data[si].length); cj++) {
                                     if (checked[cj]) {
-                                        var v = Number(data[ri][cj])
+                                        var v = Number(data[si][cj])
                                         if (!isNaN(v)) { if (v < yMin) yMin = v; if (v > yMax) yMax = v }
                                     }
                                 }
@@ -1244,32 +1290,43 @@ ApplicationWindow {
                             var pad = (yMax - yMin) * 0.1 || 1; yMin -= pad; yMax += pad
 
                             ctx.strokeStyle = "#30363d"; ctx.lineWidth = 0.5
-                            for (var gy = 0; gy <= 5; gy++) {
-                                var yFrac = gy / 5
+                            var yTicks = Math.max(6, Math.min(10, Math.floor(pH / 18)))
+                            var xTicks = Math.max(6, Math.min(10, Math.floor(pW / 55)))
+                            function fmtTick(v) {
+                                var a = Math.abs(v)
+                                if (a >= 1000) return v.toFixed(0)
+                                if (a >= 1) return v.toFixed(1)
+                                return v.toFixed(2)
+                            }
+                            for (var gy = 0; gy <= yTicks; gy++) {
+                                var yFrac = gy / yTicks
                                 var yY = mT + pH * (1 - yFrac)
                                 ctx.beginPath(); ctx.moveTo(mL, yY); ctx.lineTo(width - mR, yY); ctx.stroke()
                                 ctx.fillStyle = "#8b949e"; ctx.font = "9px monospace"
-                                ctx.fillText((yMin + (yMax - yMin) * yFrac).toFixed(1), 2, yY + 3)
+                                var yLbl = fmtTick(yMin + (yMax - yMin) * yFrac)
+                                ctx.fillText(yLbl, mL - 4 - ctx.measureText(yLbl).width, yY + 3)
                             }
-                            for (var gx = 0; gx <= 5; gx++) {
-                                var xFrac = gx / 5
+                            for (var gx = 0; gx <= xTicks; gx++) {
+                                var xFrac = gx / xTicks
                                 var xX = mL + pW * xFrac
                                 ctx.beginPath(); ctx.moveTo(xX, mT); ctx.lineTo(xX, mT + pH); ctx.stroke()
                                 ctx.fillStyle = "#8b949e"; ctx.font = "9px monospace"
-                                ctx.fillText((startRow + visibleRange * xFrac).toFixed(0), xX - 10, height - 5)
+                                var xLbl = (startRow + visibleRange * xFrac).toFixed(0)
+                                ctx.fillText(xLbl, xX - ctx.measureText(xLbl).width / 2, height - 5)
                             }
                             ctx.fillStyle = "#8b949e"; ctx.font = "9px monospace"
                             ctx.fillText("Row #", mL + pW / 2 - 15, height - 22)
 
-                            for (var ci = 1; ci < Math.min(nCols, data[0].length); ci++) {
+                            for (var ci = 1; ci < Math.min(nCols, data[sIdx].length); ci++) {
                                 if (!checked[ci]) continue
                                 ctx.strokeStyle = traceColors[ci % traceColors.length]
                                 ctx.lineWidth = 1.2
                                 ctx.beginPath()
                                 var started = false
-                                for (var rj = startRow; rj < endRow; rj += step) {
-                                    var xPos = mL + pW * ((rj - startRow) / visibleRange)
-                                    var val = Number(data[rj][ci])
+                                for (var sj = sIdx; sj < eIdx; sj += plotStep) {
+                                    var origRow = sj * csvStep
+                                    var xPos = mL + pW * ((origRow - startRow) / visibleRange)
+                                    var val = Number(data[sj][ci])
                                     if (isNaN(val)) continue
                                     var yPos = mT + pH * (1 - (val - yMin) / (yMax - yMin))
                                     if (!started) { ctx.moveTo(xPos, yPos); started = true }
@@ -1292,11 +1349,11 @@ ApplicationWindow {
                         implicitWidth: 70; implicitHeight: 24
                         onClicked: {
                             graphStartRow = 0
-                            graphEndRow = csvData.length
+                            graphEndRow = csvTotalRows
                             graphStartField.text = "0"
-                            graphEndField.text = csvData.length > 0 ? (csvData.length - 1) : "0"
+                            graphEndField.text = csvTotalRows > 0 ? (csvTotalRows - 1).toString() : "0"
                             chartCanvas.zoomMin = 0
-                            chartCanvas.zoomMax = csvData.length > 0 ? csvData.length : 1
+                            chartCanvas.zoomMax = csvTotalRows > 0 ? csvTotalRows : 1
                             chartCanvas.requestPaint()
                         }
                         contentItem: Text { text: parent.text; color: "#e6edf3"; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: 11 }
