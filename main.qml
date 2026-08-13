@@ -1873,41 +1873,35 @@ ApplicationWindow {
 
                 Item { Layout.fillWidth: true }
 
-                Button {
+                FilledButton {
                     text: "Select All"
-                    Layout.preferredWidth: 80
+                    variant: "text"
+                    implicitHeight: 36
                     onClicked: {
                         for (var i = 0; i < fileListModel.count; ++i)
                             fileListModel.set(i, {checked: true})
                     }
-                    contentItem: Text { text: parent.text; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle { color: parent.hovered ? Theme.accent : Theme.surfaceAlt; radius: 4; border.color: Theme.border; border.width: 1 }
-                    implicitHeight: 28
                 }
 
-                Button {
+                FilledButton {
                     text: "Clear"
-                    Layout.preferredWidth: 60
+                    variant: "text"
+                    implicitHeight: 36
                     onClicked: {
                         for (var i = 0; i < fileListModel.count; ++i)
                             fileListModel.set(i, {checked: false})
                     }
-                    contentItem: Text { text: parent.text; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle { color: parent.hovered ? Theme.accent : Theme.surfaceAlt; radius: 4; border.color: Theme.border; border.width: 1 }
-                    implicitHeight: 28
                 }
 
-                Button {
+                FilledButton {
                     text: "Refresh"
-                    Layout.preferredWidth: 70
+                    variant: "text"
+                    implicitHeight: 36
                     onClicked: {
                         fileListLoading = true
                         fileListModel.clear()
                         mqtt.requestFileList()
                     }
-                    contentItem: Text { text: parent.text; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle { color: parent.hovered ? Theme.accent : Theme.surfaceAlt; radius: 4; border.color: Theme.border; border.width: 1 }
-                    implicitHeight: 28
                 }
             }
 
@@ -1937,18 +1931,40 @@ ApplicationWindow {
                             anchors.rightMargin: 8
                             spacing: 8
 
+                            /*
+                             * A Material checkbox: an outlined box when off, a
+                             * filled accent box with a white tick when on.
+                             *
+                             * It used to draw a smaller filled square inside
+                             * the outline and no tick at all, so "checked"
+                             * showed as a solid blue block -- which reads as a
+                             * disabled or half-painted control rather than as a
+                             * tick, and gave the two states nothing in common
+                             * but colour.
+                             */
                             CheckBox {
                                 id: itemCheck
                                 checked: model.checked
                                 onCheckedChanged: fileListModel.set(index, {checked: checked})
                                 indicator: Rectangle {
-                                    implicitWidth: 16; implicitHeight: 16
-                                    x: itemCheck.leftPadding; y: parent.height / 2 - 8
-                                    radius: 3; color: "transparent"; border.color: Theme.accentHover; border.width: 1
-                                    Rectangle {
+                                    implicitWidth: 20; implicitHeight: 20
+                                    x: itemCheck.leftPadding
+                                    y: itemCheck.height / 2 - height / 2
+                                    radius: 4
+                                    color: itemCheck.checked ? Theme.accent : "transparent"
+                                    border.color: itemCheck.checked ? Theme.accent
+                                                                    : Theme.textSecondary
+                                    border.width: 2
+                                    Behavior on color { ColorAnimation { duration: 100 } }
+
+                                    Text {
                                         anchors.centerIn: parent
-                                        width: 10; height: 10; radius: 2
-                                        color: itemCheck.checked ? Theme.accentHover : "transparent"
+                                        text: "✓"
+                                        color: "#ffffff"
+                                        font.pixelSize: 14
+                                        font.bold: true
+                                        opacity: itemCheck.checked ? 1 : 0
+                                        Behavior on opacity { NumberAnimation { duration: 100 } }
                                     }
                                 }
                             }
@@ -1985,8 +2001,10 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 spacing: 10
 
-                Button {
+                FilledButton {
                     text: "Download Selected"
+                    variant: "filled"
+                    accent: Theme.accent
                     Layout.fillWidth: true
                     enabled: {
                         var c = 0
@@ -2006,13 +2024,13 @@ ApplicationWindow {
                         downloadDialog.close()
                         processDownloadQueue()
                     }
-                    contentItem: Text { text: parent.text; color: Theme.textPrimary; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle { color: parent.down ? Theme.success : parent.hovered ? Theme.success : parent.enabled ? Theme.accent : Theme.surfaceAlt; radius: 6; border.color: parent.enabled ? Theme.accent : Theme.border; border.width: 1 }
-                    implicitHeight: 34
+                                                            implicitHeight: 34
                 }
 
-                Button {
+                FilledButton {
                     text: "Delete Selected"
+                    variant: "outlined"
+                    accent: Theme.danger
                     Layout.fillWidth: true
                     enabled: {
                         var c = 0
@@ -2028,9 +2046,7 @@ ApplicationWindow {
                         mqtt.requestFileList()
                         logAppend("Delete commands sent.", "info")
                     }
-                    contentItem: Text { text: parent.text; color: Theme.textPrimary; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle { color: parent.down ? Theme.danger : parent.hovered ? Theme.danger : parent.enabled ? Theme.surfaceAlt : Theme.surface; radius: 6; border.color: parent.enabled ? Theme.danger : Theme.border; border.width: 1 }
-                    implicitHeight: 34
+                                                            implicitHeight: 34
                 }
             }
         }
