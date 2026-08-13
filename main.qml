@@ -68,15 +68,13 @@ ApplicationWindow {
         onUploadProgress: (pct) => {
             if (downloadQueueIndex < downloadQueue.length)
                 setQueueStatus(downloadQueueIndex, "uploading")
-            var pw = uploadBar.parent ? uploadBar.parent.width : 200
-            uploadBar.width = pct / 100 * pw
+            window.uploadPct = pct
             uploadLabel.text = "Upload " + pct + "%"
             logAppend("Upload to server: " + pct + "%", "info")
             statusText.text = "Upload: " + pct + "%"
         }
         onDownloadProgress: (pct) => {
-            var pw = downloadBar.parent ? downloadBar.parent.width : 200
-            downloadBar.width = pct / 100 * pw
+            window.downloadPct = pct
             downloadLabel.text = "Download " + pct + "%"
             if (downloadQueueIndex < downloadQueue.length && pct < 100)
                 setQueueStatus(downloadQueueIndex, "downloading")
@@ -111,8 +109,8 @@ ApplicationWindow {
             }
         }
         onFileDownloaded: (csvData) => {
-            uploadBar.width = 0
-            downloadBar.width = 0
+            window.uploadPct = 0
+            window.downloadPct = 0
             uploadLabel.text = "Upload 0%"
             downloadLabel.text = "Download 0%"
             if (pendingSavePath !== "") {
@@ -136,8 +134,7 @@ ApplicationWindow {
                 downloadBuffer = ""
             }
             var pct = (chunk + 1) / total * 100
-            var pw = downloadBar.parent ? downloadBar.parent.width : 200
-            downloadBar.width = pct / 100 * pw
+            window.downloadPct = pct
             downloadLabel.text = "Download " + pct.toFixed(0) + "%"
             downloadBuffer += data
             if (chunk + 1 >= total) {
@@ -652,6 +649,10 @@ ApplicationWindow {
         onRejected: console.log("FolderDialog rejected")
     }
 
+    /* 0-100, drives both progress bars by binding. */
+    property int uploadPct: 0
+    property int downloadPct: 0
+
     property bool showGraph: false
 
     property int graphFileIndex: -1
@@ -1107,7 +1108,16 @@ ApplicationWindow {
         Rectangle {
             id: progressPanel
             Layout.fillWidth: true
-            Layout.preferredHeight: 54
+            /*
+             * Sized from its contents, not a magic number.
+             *
+             * This was a fixed 54px with clip:true, while the column inside
+             * needs about 76 -- two 8px bars with 12px labels, a title row, the
+             * spacings and 8px margins. So the download bar and its label were
+             * simply cut off by the bottom edge, which is what "the download
+             * bars do not look right" was.
+             */
+            Layout.preferredHeight: progressCol.implicitHeight + 20
             visible: downloadQueueActive && downloadQueue.length > 0
             color: Theme.surface
             radius: 8
@@ -1115,9 +1125,10 @@ ApplicationWindow {
             clip: true
 
             ColumnLayout {
+                id: progressCol
                 anchors.fill: parent
                 anchors.margins: 8
-                spacing: 4
+                spacing: 6
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -1160,12 +1171,18 @@ ApplicationWindow {
                         color: Theme.background
                         clip: true
 
+                        /* Bound to a percentage rather than assigned a pixel
+                           width by the signal handlers. The old form read the
+                           parent's width at the moment the message arrived, so
+                           the bar kept a stale pixel length across a window
+                           resize and no longer matched its own track. */
                         Rectangle {
                             id: uploadBar
                             height: parent.height
-                            width: 0
+                            width: parent.width * (window.uploadPct / 100)
                             color: Theme.accentHover
                             radius: 4
+                            Behavior on width { NumberAnimation { duration: 150 } }
                         }
                     }
 
@@ -1193,9 +1210,10 @@ ApplicationWindow {
                         Rectangle {
                             id: downloadBar
                             height: parent.height
-                            width: 0
+                            width: parent.width * (window.downloadPct / 100)
                             color: Theme.success
                             radius: 4
+                            Behavior on width { NumberAnimation { duration: 150 } }
                         }
                     }
 
