@@ -62,6 +62,15 @@ public:
     /* Row index <-> value, so the QML mouse handlers can convert a pixel. */
     Q_INVOKABLE qreal valueAt(int column, int row) const;
 
+    /* The timestamp of a row, in whatever units column 0 carries (the
+       recorder writes microseconds). The axis is labelled from these rather
+       than from row numbers -- see the note in updatePaintNode. */
+    Q_INVOKABLE qreal timeAt(int row) const;
+    /* Seconds spanned by the current x window, 0 if unknown. */
+    Q_INVOKABLE qreal visibleSeconds() const;
+    /* Mean sample rate over the current window, Hz. 0 if unknown. */
+    Q_INVOKABLE qreal sampleRateHz() const;
+
     qreal xMin() const { return m_xMin; }
     qreal xMax() const { return m_xMax; }
     qreal yMin() const { return m_yMin; }

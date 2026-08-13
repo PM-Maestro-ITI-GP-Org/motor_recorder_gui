@@ -306,6 +306,15 @@ ApplicationWindow {
 
     /* Resolve a log line's colour at paint time. Kept next to logAppend so the
        two cannot drift. */
+    /* Seconds, shown in whatever unit keeps the number readable at this
+       zoom -- at a few dozen samples the span is microseconds. */
+    function fmtTime(sec) {
+        var a = Math.abs(sec)
+        if (a >= 1)      return sec.toFixed(3) + "s"
+        if (a >= 1e-3)   return (sec * 1e3).toFixed(2) + "ms"
+        return (sec * 1e6).toFixed(0) + "us"
+    }
+
     function logColorFor(type) {
         if (type === "success") return Theme.success
         if (type === "error")   return Theme.danger
@@ -1555,11 +1564,25 @@ ApplicationWindow {
                                 var xX = mL + pW * xFrac
                                 ctx.beginPath(); ctx.moveTo(xX, mT); ctx.lineTo(xX, mT + pH); ctx.stroke()
                                 ctx.fillStyle = Theme.textSecondary; ctx.font = "9px monospace"
-                                var xLbl = (startRow + visibleRange * xFrac).toFixed(0)
+                                /* Labelled in time, from the timestamp column,
+                                   because that is what the curve is now plotted
+                                   against. Row numbers said nothing about rate
+                                   and hid any gap in the capture. */
+                                var rAt = Math.min(csvTotalRows - 1,
+                                                   Math.round(startRow + visibleRange * xFrac))
+                                var tRel = (traceView.timeAt(rAt) - traceView.timeAt(startRow)) / 1e6
+                                var xLbl = window.fmtTime(tRel)
                                 ctx.fillText(xLbl, xX - ctx.measureText(xLbl).width / 2, height - 5)
                             }
                             ctx.fillStyle = Theme.textSecondary; ctx.font = "9px monospace"
-                            ctx.fillText("Row #", mL + pW / 2 - 15, height - 22)
+                            var sr = traceView.sampleRateHz()
+                            var axisCap = sr > 0
+                                ? ("Time (s)   ·   " + (sr >= 1000 ? (sr/1000).toFixed(1) + " kHz"
+                                                                  : sr.toFixed(0) + " Hz")
+                                   + "   ·   " + traceView.visibleSeconds().toFixed(4) + " s shown")
+                                : "Row #"
+                            ctx.fillText(axisCap, mL + pW / 2 - ctx.measureText(axisCap).width / 2,
+                                         height - 22)
 
                             /* The traces themselves are drawn by the
                                TraceView below -- on the GPU, from float

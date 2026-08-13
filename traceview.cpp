@@ -106,6 +106,32 @@ void TraceView::clearData()
     update();
 }
 
+qreal TraceView::timeAt(int row) const
+{
+    if (m_cols.isEmpty() || row < 0 || row >= m_cols[0].size()) return 0;
+    return m_cols[0][row];
+}
+
+/* Column 0 is microseconds on the wire (mqtt_client.c publishes the STM32
+   timebase in us, and the CSV carries the same). */
+qreal TraceView::visibleSeconds() const
+{
+    const int r0 = qMax(0, int(std::floor(m_xMin)));
+    const int r1 = qMin(m_rows, int(std::ceil(m_xMax)));
+    if (m_cols.isEmpty() || r1 - r0 < 2) return 0;
+    const double us = double(m_cols[0][r1 - 1]) - double(m_cols[0][r0]);
+    return us > 0 ? us / 1e6 : 0;
+}
+
+qreal TraceView::sampleRateHz() const
+{
+    const int r0 = qMax(0, int(std::floor(m_xMin)));
+    const int r1 = qMin(m_rows, int(std::ceil(m_xMax)));
+    const double secs = visibleSeconds();
+    if (secs <= 0) return 0;
+    return double(r1 - r0 - 1) / secs;
+}
+
 qreal TraceView::valueAt(int column, int row) const
 {
     if (column < 0 || column >= m_cols.size()) return 0;
@@ -209,6 +235,13 @@ QSGNode *TraceView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
     const int step   = qMax(1, span / qMax(1, w));
     const int points = qMax(2, (span + step - 1) / step);
 
+    /* Column 0 is the timebase when it is present and monotonic; if it is
+       not, fall back to index spacing rather than drawing nonsense. */
+    const QVector<float> *tsCol = nullptr;
+    if (!m_cols.isEmpty() && m_cols[0].size() == m_rows
+        && m_cols[0][r1 - 1] > m_cols[0][r0])
+        tsCol = &m_cols[0];
+
     int childIdx = 0;
     for (int c = 1; c < m_cols.size(); ++c) {
         if (c >= m_visible.size() || !m_visible[c].toBool()) continue;
@@ -239,9 +272,26 @@ QSGNode *TraceView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
         QSGGeometry::Point2D *v = g->vertexDataAsPoint2D();
         const QVector<float> &col = m_cols[c];
 
+        /*
+         * X comes from the timestamp column, not from the row index.
+         *
+         * Plotting against the index assumes every row is equally spaced in
+         * time. They are not: the producer streams blocks off SPI and a
+         * dropped or delayed block leaves a real gap, so index-space drew
+         * those samples as adjacent and silently compressed the gap away.
+         * Zoomed out that is invisible; zoomed in to a few dozen rows it is
+         * the whole picture, and the shape on screen is not the shape of the
+         * signal. Using the timestamps puts each sample where it actually
+         * happened, and the spacing then carries the true rate.
+         */
+        const double t0 = tsCol ? double((*tsCol)[r0])     : double(r0);
+        const double t1 = tsCol ? double((*tsCol)[r1 - 1]) : double(r1 - 1);
+        const double tSpan = (t1 > t0) ? (t1 - t0) : double(qMax(1, span));
+
         for (int i = 0; i < points; ++i) {
             const int r = qMin(r1 - 1, r0 + i * step);
-            const float x = float(r - r0) / float(span) * float(w);
+            const double tv = tsCol ? double((*tsCol)[r]) : double(r);
+            const float x = float((tv - t0) / tSpan) * float(w);
             const float y = float(h) * (1.f - (col[r] - lo) / yRange);
             v[i].set(x, y);
         }
