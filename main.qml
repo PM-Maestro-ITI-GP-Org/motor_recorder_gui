@@ -691,9 +691,31 @@ ApplicationWindow {
     }
 
     function parseDownloadedCSV(raw) {
-        var lines = raw.trim().split('\n')
+        /*
+         * The order of operations here is the whole cost.
+         *
+         * It used to trim() every line and only then decide, from the
+         * decimation step, whether to keep it -- so on a file of 200k rows
+         * displayed as 2k, it allocated 200k trimmed strings to throw away 198k
+         * of them. trim() on the whole file was a second full copy on top. The
+         * work now happens only for rows that survive: the skip test is first,
+         * and split() runs about `maxPlotRows` times instead of once per line.
+         *
+         * Emptiness is tested without allocating. Lines are never
+         * whitespace-only in practice -- the recorder writes them -- but a file
+         * saved with CRLF leaves a stray '\r', so that one case is handled
+         * explicitly rather than by trimming everything defensively.
+         */
+        if (!raw || raw.length === 0) { csvData = []; csvTotalRows = 0; csvStep = 1; return }
+
+        var lines = raw.split('\n')
         if (lines.length < 2) { csvData = []; csvTotalRows = 0; csvStep = 1; return }
-        var headerCols = lines[0].split(',')
+
+        function isBlank(s) {
+            return s.length === 0 || (s.length === 1 && s.charCodeAt(0) === 13)
+        }
+
+        var headerCols = lines[0].replace(/\r$/, "").split(',')
         csvHeader = headerCols.slice()
         var friendly = []
         for (var k = 0; k < headerCols.length; ++k)
@@ -701,18 +723,31 @@ ApplicationWindow {
         csvColumns = friendly
         initColumnStates()
         var nCols = csvColumns.length
+
+        /* One pass to count, so the step is right before anything is kept.
+           Counting is a length check per line -- no allocation. */
+        var total = 0
+        var i
+        for (i = 1; i < lines.length; i++)
+            if (!isBlank(lines[i])) total++
+
+        var step = Math.max(1, Math.floor(total / maxPlotRows))
+
         var rows = []
-        var dataCount = 0
-        var step = Math.max(1, Math.floor((lines.length - 1) / maxPlotRows))
-        for (var i = 1; i < lines.length; i++) {
-            var line = lines[i].trim()
-            if (line === "") continue
-            dataCount++
-            if ((dataCount - 1) % step !== 0) continue
+        var kept = 0
+        var seen = 0
+        for (i = 1; i < lines.length; i++) {
+            var line = lines[i]
+            if (isBlank(line)) continue
+            /* Decide BEFORE paying for trim/split. */
+            if (seen++ % step !== 0) continue
+            if (line.charCodeAt(line.length - 1) === 13)
+                line = line.substring(0, line.length - 1)
             var cols = line.split(',')
-            if (cols.length >= nCols) rows.push(cols)
+            if (cols.length >= nCols) { rows.push(cols); kept++ }
         }
-        csvTotalRows = dataCount
+
+        csvTotalRows = total
         csvStep = step
         csvData = rows
     }
@@ -1217,29 +1252,40 @@ ApplicationWindow {
             }
         }
 
+        /*
+         * The footer.
+         *
+         * Everything here was sized in absolute pixels for the old 9-11px type
+         * -- a 20px-tall directory box and a 50x20 "Browse" button. Against the
+         * larger scale the text no longer fits its container, so the bottom
+         * strip came out clipped and crooked. Heights follow the font now, and
+         * the button is allowed to size to its own label.
+         */
         RowLayout {
             Layout.fillWidth: true
-            spacing: 8
+            Layout.topMargin: Theme.spacingTight
+            spacing: Theme.spacingTight
 
             Text {
                 id: statusText
                 text: "Ready"
                 color: Theme.textSecondary
                 font.pixelSize: Theme.fontSmall
+                elide: Text.ElideRight
                 Layout.fillWidth: true
             }
 
             Text {
                 text: "Save to:"
                 color: Theme.textSecondary
-                font.pixelSize: Theme.fontTiny
+                font.pixelSize: Theme.fontSmall
             }
 
             Rectangle {
-                Layout.preferredWidth: 180
-                Layout.preferredHeight: 20
+                Layout.preferredWidth: 280
+                Layout.preferredHeight: 36
                 color: Theme.surface
-                radius: 4
+                radius: Theme.radiusSmall
                 border.color: Theme.border
                 border.width: 1
                 clip: true
@@ -1248,26 +1294,24 @@ ApplicationWindow {
                     id: downloadDirInput
                     text: downloadDir
                     color: Theme.textPrimary
-                    font.pixelSize: Theme.fontTiny
+                    font.pixelSize: Theme.fontSmall
                     anchors.left: parent.left
-                    anchors.leftMargin: 4
+                    anchors.right: parent.right
+                    anchors.leftMargin: Theme.spacingTight
+                    anchors.rightMargin: Theme.spacingTight
                     anchors.verticalCenter: parent.verticalCenter
                     onEditingFinished: { downloadDir = text; updateGraphFilesModel() }
                     selectByMouse: true
                 }
             }
 
-            Button {
+            FilledButton {
                 text: "Browse"
-                implicitWidth: 50
-                implicitHeight: 20
-                onClicked: {
-                    console.log("Browse clicked")
-                    folderDialog.open()
-                    console.log("Folder dialog opened")
-                }
-                contentItem: Text { text: parent.text; color: Theme.textPrimary; font.pixelSize: Theme.fontTiny; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                background: Rectangle { color: parent.hovered ? Theme.accent : Theme.surfaceAlt; radius: 4; border.color: Theme.border; border.width: 1 }
+                implicitHeight: 36
+                fill: Theme.surfaceAlt
+                fillHover: Theme.accentSoft
+                textColor: Theme.textPrimary
+                onClicked: folderDialog.open()
             }
         }
     }
@@ -1378,6 +1422,56 @@ ApplicationWindow {
                         property real zoomMin: 0
                         property real zoomMax: csvTotalRows > 0 ? csvTotalRows : 1
 
+                        /* Y window. NaN on either side means autoscale. */
+                        property real yLo: NaN
+                        property real yHi: NaN
+
+                        /* Plot geometry, written by onPaint so the mouse
+                           handlers can map a pixel back to (row, value). They
+                           cannot recompute it: the margins and the autoscaled
+                           Y range are only known inside the paint. */
+                        property real plotL: 60
+                        property real plotT: 10
+                        property real plotW: 1
+                        property real plotH: 1
+                        property real viewX0: 0
+                        property real viewSpan: 1
+                        property real viewYLo: 0
+                        property real viewYHi: 1
+
+                        function pxToRow(px) {
+                            return viewX0 + viewSpan * ((px - plotL) / Math.max(1, plotW))
+                        }
+                        function pxToVal(py) {
+                            return viewYLo + (viewYHi - viewYLo)
+                                   * (1 - (py - plotT) / Math.max(1, plotH))
+                        }
+                        function resetZoom() {
+                            yLo = NaN; yHi = NaN
+                            graphStartRow = 0
+                            graphEndRow = csvTotalRows
+                            graphStartField.text = "0"
+                            graphEndField.text = csvTotalRows > 0 ? (csvTotalRows - 1).toString() : "0"
+                            requestPaint()
+                        }
+                        /* Clamp an X window to the data and keep it usable --
+                           without a floor, one more wheel notch at full zoom
+                           collapses the span to zero and nothing draws. */
+                        function setXWindow(a, b) {
+                            var lo = Math.max(0, Math.round(Math.min(a, b)))
+                            var hi = Math.min(csvTotalRows, Math.round(Math.max(a, b)))
+                            if (hi - lo < 2) {
+                                var mid = (lo + hi) / 2
+                                lo = Math.max(0, Math.round(mid - 1))
+                                hi = Math.min(csvTotalRows, lo + 2)
+                            }
+                            graphStartRow = lo
+                            graphEndRow = hi
+                            graphStartField.text = lo.toString()
+                            graphEndField.text = (hi - 1).toString()
+                            requestPaint()
+                        }
+
                         onPaint: {
                             var ctx = getContext("2d")
                             ctx.clearRect(0, 0, width, height)
@@ -1423,6 +1517,23 @@ ApplicationWindow {
                             }
                             if (yMin === Infinity) { yMin = 0; yMax = 1000 }
                             var pad = (yMax - yMin) * 0.1 || 1; yMin -= pad; yMax += pad
+
+                            /* A box zoom pins Y as well as X; without that,
+                               drawing a rectangle round a feature would widen
+                               back out to the autoscale the moment it repainted.
+                               NaN means "autoscale", which is what Reset
+                               restores. */
+                            if (!isNaN(chartCanvas.yLo) && !isNaN(chartCanvas.yHi)
+                                && chartCanvas.yHi > chartCanvas.yLo) {
+                                yMin = chartCanvas.yLo
+                                yMax = chartCanvas.yHi
+                            }
+                            /* Published so the mouse handlers can convert a
+                               pixel back into a row and a value. */
+                            chartCanvas.plotL = mL; chartCanvas.plotT = mT
+                            chartCanvas.plotW = pW; chartCanvas.plotH = pH
+                            chartCanvas.viewYLo = yMin; chartCanvas.viewYHi = yMax
+                            chartCanvas.viewX0 = startRow; chartCanvas.viewSpan = visibleRange
 
                             ctx.strokeStyle = Theme.border; ctx.lineWidth = 0.5
                             var yTicks = Math.max(6, Math.min(10, Math.floor(pH / 18)))
@@ -1471,6 +1582,119 @@ ApplicationWindow {
                             }
                         }
                     }
+
+                    /*
+                     * Zoom, the way MATLAB's figure window does it:
+                     *   drag           -- rubber band, zoom to the box (X and Y)
+                     *   wheel          -- zoom X about the cursor
+                     *   shift + wheel  -- zoom Y about the cursor
+                     *   right-drag     -- pan
+                     *   double-click   -- back to full extent
+                     *
+                     * Kept as a sibling of the Canvas rather than a child, so
+                     * it is not repainted with it.
+                     */
+                    Rectangle {
+                        id: rubberBand
+                        visible: false
+                        color: "#301f6feb"
+                        border.color: Theme.accent
+                        border.width: 1
+                        z: 5
+                    }
+
+                    MouseArea {
+                        id: chartMouse
+                        anchors.fill: parent
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        hoverEnabled: true
+                        cursorShape: pressedButtons & Qt.RightButton
+                                     ? Qt.ClosedHandCursor : Qt.CrossCursor
+
+                        property real dragX0: 0
+                        property real dragY0: 0
+                        property bool banding: false
+                        property bool panning: false
+                        property real panRow0: 0
+                        property real panStart0: 0
+                        property real panEnd0: 0
+
+                        onPressed: (mouse) => {
+                            if (csvData.length < 2) return
+                            dragX0 = mouse.x; dragY0 = mouse.y
+                            if (mouse.button === Qt.RightButton) {
+                                panning = true
+                                panRow0 = chartCanvas.pxToRow(mouse.x)
+                                panStart0 = graphStartRow
+                                panEnd0 = graphEndRow
+                            } else {
+                                banding = true
+                                rubberBand.x = mouse.x; rubberBand.y = mouse.y
+                                rubberBand.width = 0; rubberBand.height = 0
+                                rubberBand.visible = true
+                            }
+                        }
+
+                        onPositionChanged: (mouse) => {
+                            if (banding) {
+                                rubberBand.x = Math.min(dragX0, mouse.x)
+                                rubberBand.y = Math.min(dragY0, mouse.y)
+                                rubberBand.width = Math.abs(mouse.x - dragX0)
+                                rubberBand.height = Math.abs(mouse.y - dragY0)
+                            } else if (panning) {
+                                /* Drag the data with the cursor: hold the row
+                                   that was grabbed under the pointer. */
+                                var span = panEnd0 - panStart0
+                                var dRows = -(mouse.x - dragX0) / Math.max(1, chartCanvas.plotW) * span
+                                chartCanvas.setXWindow(panStart0 + dRows, panEnd0 + dRows)
+                            }
+                        }
+
+                        onReleased: (mouse) => {
+                            if (panning) { panning = false; return }
+                            if (!banding) return
+                            banding = false
+                            rubberBand.visible = false
+
+                            /* A click, not a drag: ignore rather than zooming
+                               to a zero-width box and blanking the plot. */
+                            if (rubberBand.width < 8 || rubberBand.height < 8) return
+
+                            var r0 = chartCanvas.pxToRow(rubberBand.x)
+                            var r1 = chartCanvas.pxToRow(rubberBand.x + rubberBand.width)
+                            /* y is inverted: the top of the box is the HIGH value */
+                            var vTop = chartCanvas.pxToVal(rubberBand.y)
+                            var vBot = chartCanvas.pxToVal(rubberBand.y + rubberBand.height)
+                            chartCanvas.yLo = Math.min(vTop, vBot)
+                            chartCanvas.yHi = Math.max(vTop, vBot)
+                            chartCanvas.setXWindow(r0, r1)
+                        }
+
+                        onDoubleClicked: chartCanvas.resetZoom()
+
+                        onWheel: (wheel) => {
+                            if (csvData.length < 2) return
+                            var factor = wheel.angleDelta.y > 0 ? 0.8 : 1.25
+
+                            if (wheel.modifiers & Qt.ShiftModifier) {
+                                /* Y zoom about the cursor. Seed from the live
+                                   autoscaled range when no manual range is set,
+                                   so the first shift-wheel does not jump. */
+                                var lo = isNaN(chartCanvas.yLo) ? chartCanvas.viewYLo : chartCanvas.yLo
+                                var hi = isNaN(chartCanvas.yHi) ? chartCanvas.viewYHi : chartCanvas.yHi
+                                var at = chartCanvas.pxToVal(wheel.y)
+                                chartCanvas.yLo = at - (at - lo) * factor
+                                chartCanvas.yHi = at + (hi - at) * factor
+                                chartCanvas.requestPaint()
+                            } else {
+                                var atRow = chartCanvas.pxToRow(wheel.x)
+                                var s = graphStartRow, e = graphEndRow
+                                if (e <= s) { s = 0; e = csvTotalRows }
+                                chartCanvas.setXWindow(atRow - (atRow - s) * factor,
+                                                       atRow + (e - atRow) * factor)
+                            }
+                        }
+                    }
                 }
 
                 RowLayout {
@@ -1489,6 +1713,11 @@ ApplicationWindow {
                             graphEndField.text = csvTotalRows > 0 ? (csvTotalRows - 1).toString() : "0"
                             chartCanvas.zoomMin = 0
                             chartCanvas.zoomMax = csvTotalRows > 0 ? csvTotalRows : 1
+                            /* Also drop the Y window, or Reset would restore the
+                               full row range while leaving the plot zoomed in
+                               vertically -- half a reset reads as a bug. */
+                            chartCanvas.yLo = NaN
+                            chartCanvas.yHi = NaN
                             chartCanvas.requestPaint()
                         }
                         contentItem: Text { text: parent.text; color: Theme.textPrimary; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: Theme.fontSmall }

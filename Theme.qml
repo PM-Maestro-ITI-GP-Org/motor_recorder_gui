@@ -1,3 +1,20 @@
+/*
+ * `pragma Singleton` is REQUIRED here, and this line is load-bearing.
+ *
+ * It pairs with the C++ side:
+ *
+ *     qmlRegisterSingletonType(QUrl("qrc:/Theme.qml"), "App", 1, 0, "Theme")
+ *
+ * Registering a QML file as a singleton and omitting the pragma is not a
+ * tolerated mismatch, it is fatal:
+ *
+ *     qrc:/Theme.qml: qmldir defines type as singleton, but no pragma
+ *     Singleton found in type App/Theme
+ *
+ * and since main.qml imports Theme, the whole file fails to load and the app
+ * exits with no window at all. Removing it was tried, on the theory that older
+ * Qt might reject having both; the opposite is true.
+ */
 pragma Singleton
 import QtQuick
 
