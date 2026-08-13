@@ -735,21 +735,17 @@ ApplicationWindow {
 
         var step = Math.max(1, Math.floor(total / maxPlotRows))
 
+        /*
+         * No row table is built any more.
+         *
+         * TraceView parsed the whole file into float columns a few lines up,
+         * and it is what draws. Building a second, decimated copy here cost a
+         * full pass over every line of the file -- on a 196MB recording that
+         * pass is what froze the window on the first click of Graphs, and its
+         * only remaining consumers were two `csvData.length < 2` guards. Those
+         * ask the renderer instead.
+         */
         var rows = []
-        var kept = 0
-        var seen = 0
-        for (i = 1; i < lines.length; i++) {
-            var line = lines[i]
-            if (isBlank(line)) continue
-            /* Decide BEFORE paying for trim/split. */
-            if (seen++ % step !== 0) continue
-            if (line.charCodeAt(line.length - 1) === 13)
-                line = line.substring(0, line.length - 1)
-            var cols = line.split(',')
-            if (cols.length >= nCols) { rows.push(cols); kept++ }
-        }
-
-        /* Prefer the renderer's count: it kept every row. */
         csvTotalRows = traceView.rowCount > 0 ? traceView.rowCount : total
         csvStep = step
         csvData = rows
@@ -1483,7 +1479,7 @@ ApplicationWindow {
                             var ctx = getContext("2d")
                             ctx.clearRect(0, 0, width, height)
                             var data = csvData
-                            if (data.length < 2) {
+                            if (traceView.rowCount < 2) {
                                 ctx.fillStyle = Theme.textSecondary; ctx.font = "14px monospace"
                                 ctx.fillText("No data to display", width/2 - 70, height/2)
                                 return
@@ -1513,18 +1509,11 @@ ApplicationWindow {
                             var plotStep = Math.max(1, Math.ceil(nSamples / maxPts))
                             var nCols = csvColumns.length > 0 ? csvColumns.length : Math.min(13, data[0].length)
 
-                            var yMin = Infinity, yMax = -Infinity
-                            for (var si = sIdx; si < eIdx; si += plotStep) {
-                                for (var cj = 1; cj < Math.min(nCols, data[si].length); cj++) {
-                                    if (checked[cj]) {
-                                        var v = Number(data[si][cj])
-                                        if (!isNaN(v)) { if (v < yMin) yMin = v; if (v > yMax) yMax = v }
-                                    }
-                                }
-                            }
-                            if (yMin === Infinity) { yMin = 0; yMax = 1000 }
-                            var pad = (yMax - yMin) * 0.1 || 1; yMin -= pad; yMax += pad
-
+                            /* Y comes from the renderer (below); the scan that
+                               used to be here walked the decimated JS table on
+                               every repaint and is now both redundant and
+                               reading a table that no longer exists. */
+                            var yMin = 0, yMax = 1
                             /* A box zoom pins Y as well as X; without that,
                                drawing a rectangle round a feature would widen
                                back out to the autoscale the moment it repainted.
@@ -1630,7 +1619,7 @@ ApplicationWindow {
                         property real panEnd0: 0
 
                         onPressed: (mouse) => {
-                            if (csvData.length < 2) return
+                            if (traceView.rowCount < 2) return
                             dragX0 = mouse.x; dragY0 = mouse.y
                             if (mouse.button === Qt.RightButton) {
                                 panning = true
@@ -1683,7 +1672,7 @@ ApplicationWindow {
                         onDoubleClicked: chartCanvas.resetZoom()
 
                         onWheel: (wheel) => {
-                            if (csvData.length < 2) return
+                            if (traceView.rowCount < 2) return
                             var factor = wheel.angleDelta.y > 0 ? 0.8 : 1.25
 
                             if (wheel.modifiers & Qt.ShiftModifier) {
@@ -1704,6 +1693,62 @@ ApplicationWindow {
                                                        atRow + (e - atRow) * factor)
                             }
                         }
+                    }
+                }
+
+                /*
+                 * Pan bar. Scrubs the zoom window across the recording while
+                 * keeping its width, so a narrow window can be walked along
+                 * without zooming out and back in to find the next part.
+                 *
+                 * Disabled when the whole file is already visible, since there
+                 * is then nowhere to pan to.
+                 */
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.spacingTight
+                    visible: traceView.rowCount > 1
+
+                    Text {
+                        text: "Pan"
+                        color: Theme.textSecondary
+                        font.pixelSize: Theme.fontSmall
+                    }
+
+                    Slider {
+                        id: panSlider
+                        Layout.fillWidth: true
+                        from: 0; to: 1
+                        enabled: (graphEndRow - graphStartRow) < csvTotalRows
+
+                        /* Position of the window's left edge within the room
+                           it has to move. Bound, so zooming with the wheel or
+                           the rubber band moves the handle too -- but only
+                           while the user is not dragging it, or the binding
+                           would fight the drag. */
+                        value: {
+                            var span = graphEndRow - graphStartRow
+                            var room = csvTotalRows - span
+                            return room > 0 ? graphStartRow / room : 0
+                        }
+
+                        onMoved: {
+                            var span = graphEndRow - graphStartRow
+                            var room = csvTotalRows - span
+                            if (room <= 0) return
+                            var start = Math.round(value * room)
+                            chartCanvas.setXWindow(start, start + span)
+                        }
+                    }
+
+                    Text {
+                        text: traceView.visibleSeconds() > 0
+                              ? window.fmtTime(traceView.visibleSeconds()) + " window"
+                              : ""
+                        color: Theme.textSecondary
+                        font.pixelSize: Theme.fontSmall
+                        Layout.preferredWidth: 130
+                        horizontalAlignment: Text.AlignRight
                     }
                 }
 
@@ -1768,15 +1813,36 @@ ApplicationWindow {
                                 enabled: index >= 1
                                 onCheckedChanged: {
                                     if (index >= 1 && index < checkedColumns.length) {
-                                        checkedColumns[index] = checked
+                                        /* Reassigned, not mutated in place.
+                                           `property var` only signals a change
+                                           when it is ASSIGNED, so writing
+                                           checkedColumns[i] = x updated the
+                                           array and told nobody -- the binding
+                                           feeding seriesVisible never
+                                           re-evaluated, so the renderer kept
+                                           whatever set it was given at load
+                                           time and only ever drew column 1. */
+                                        var next = checkedColumns.slice()
+                                        next[index] = checked
+                                        checkedColumns = next
                                         chartCanvas.requestPaint()
                                     }
                                 }
                                 indicator: Rectangle {
-                                    implicitWidth: 14; implicitHeight: 14
-                                    x: cb.leftPadding; y: parent.height / 2 - 7
-                                    radius: 3; color: "transparent"; border.color: Theme.accentHover; border.width: 1
+                                    implicitWidth: 20; implicitHeight: 20
+                                    x: cb.leftPadding; y: cb.height / 2 - 10
+                                    radius: 4
+                                    color: cb.checked ? Theme.accent : "transparent"
+                                    border.color: cb.checked ? Theme.accent : Theme.textSecondary
+                                    border.width: 2
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "✓"; color: "#ffffff"
+                                        font.pixelSize: 14; font.bold: true
+                                        opacity: cb.checked ? 1 : 0
+                                    }
                                     Rectangle {
+                                        visible: false
                                         anchors.centerIn: parent
                                         width: 10; height: 10; radius: 2
                                         color: cb.checked ? (traceColors[index % traceColors.length]) : "transparent"
