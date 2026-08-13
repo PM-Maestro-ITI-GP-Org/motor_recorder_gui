@@ -905,8 +905,10 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.topMargin: 4
 
-                Button {
+                FilledButton {
                     id: btnConnect
+                    variant: "filled"
+                    accent: mqtt.connected ? Theme.danger : Theme.success
                     text: "Connect"
                     Layout.fillWidth: true
                     Layout.preferredHeight: 48
@@ -916,41 +918,23 @@ ApplicationWindow {
                         else
                             mqtt.connectToBroker()
                     }
-                    contentItem: Text {
-                        text: btnConnect.text
-                        color: btnConnect.enabled ? Theme.textPrimary : Theme.textDisabled
-                        font.bold: true
-                        font.pixelSize: Theme.fontBody
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
-                    background: Rectangle {
-                        color: btnConnect.down ? Theme.accent : btnConnect.hovered ? Theme.success : btnConnect.enabled ? Theme.success : Theme.surfaceAlt
-                        radius: 8
-                    }
                 }
 
-                Button {
+                FilledButton {
                     id: btnStart
+                    variant: "filled"
+                    accent: Theme.accent
                     text: "Start"
                     enabled: false
                     Layout.fillWidth: true
                     Layout.preferredHeight: 48
                     onClicked: startDialog.open()
-                    contentItem: Text {
-                        text: btnStart.text; color: btnStart.enabled ? Theme.textPrimary : Theme.textDisabled; font.bold: true; font.pixelSize: Theme.fontBody
-                        horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                    }
-                    background: Rectangle {
-                        color: btnStart.down ? Theme.accent : btnStart.hovered ? Theme.accent : btnStart.enabled ? Theme.surfaceAlt : Theme.surface
-                    radius: 8
-                    border.color: btnStart.enabled ? Theme.accentHover : "transparent"
-                    border.width: 1
-                }
             }
 
-            Button {
+            FilledButton {
                 id: btnStop
+                    variant: "tonal"
+                    accent: Theme.danger
                 text: "Stop"
                 enabled: false
                 Layout.fillWidth: true
@@ -964,39 +948,23 @@ ApplicationWindow {
                     enableButtons("stopped")
                     logAppend("Sent STOP command.", "info")
                 }
-                contentItem: Text {
-                    text: btnStop.text; color: btnStop.enabled ? Theme.textPrimary : Theme.textDisabled; font.bold: true; font.pixelSize: Theme.fontBody
-                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    color: btnStop.down ? Theme.danger : btnStop.hovered ? Theme.danger : btnStop.enabled ? Theme.surfaceAlt : Theme.surface
-                    radius: 8
-                    border.color: btnStop.enabled ? Theme.danger : "transparent"
-                    border.width: 1
-                }
             }
 
-            Button {
+            FilledButton {
                 id: btnDownload
+                    variant: "outlined"
+                    accent: Theme.accent
                 text: "Files"
                 enabled: false
                 Layout.fillWidth: true
                 Layout.preferredHeight: 48
                 onClicked: downloadDialog.open()
-                contentItem: Text {
-                    text: btnDownload.text; color: btnDownload.enabled ? Theme.textPrimary : Theme.textDisabled; font.bold: true; font.pixelSize: Theme.fontBody
-                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    color: btnDownload.down ? Theme.accent : btnDownload.hovered ? Theme.accent : btnDownload.enabled ? Theme.surfaceAlt : Theme.surface
-                    radius: 8
-                    border.color: btnDownload.enabled ? Theme.accentHover : "transparent"
-                    border.width: 1
-                }
             }
 
-            Button {
+            FilledButton {
                 id: btnGraphs
+                    variant: "outlined"
+                    accent: Theme.accent
                 text: "Graphs"
                 enabled: false
                 Layout.fillWidth: true
@@ -1009,16 +977,6 @@ ApplicationWindow {
                     } else {
                         loadSelectedFile(graphFileCombo.currentIndex)
                     }
-                }
-                contentItem: Text {
-                    text: btnGraphs.text; color: btnGraphs.enabled ? Theme.textPrimary : Theme.textDisabled; font.bold: true; font.pixelSize: Theme.fontBody
-                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    color: btnGraphs.down ? Theme.accent : btnGraphs.hovered ? Theme.accent : btnGraphs.enabled ? Theme.surfaceAlt : Theme.surface
-                    radius: 8
-                    border.color: btnGraphs.enabled ? Theme.accentHover : "transparent"
-                    border.width: 1
                 }
             }
         }
