@@ -20,6 +20,11 @@
 #include <MQTTClient.h>
 #endif
 
+/* Holds the Paho callback context. Defined in the .cpp; the client has to keep
+   a handle on it because Paho does not own it and every reconnect used to
+   allocate a fresh one and drop the last. */
+struct MqttContext;
+
 class MqttClient : public QObject
 {
     Q_OBJECT
@@ -85,6 +90,8 @@ private:
 #ifdef HAVE_MQTT
     MQTTClient m_client;
 #endif
+    /* The callback context handed to Paho, kept so it can be freed. */
+    MqttContext *m_ctx = nullptr;
     QTimer *m_cmdTimer;
     QTimer *m_yieldTimer;
     QTimer *m_reconnectTimer;
@@ -104,6 +111,11 @@ public:
     void setStatusText(const QString &t);
     void clearPendingCmd();
     void scheduleReconnect();
+
+    /* Disconnect, destroy and free everything the last connect allocated.
+       Every path that lets go of a client goes through here so none of them
+       can forget one of the three. */
+    void teardownClient();
 };
 
 #endif

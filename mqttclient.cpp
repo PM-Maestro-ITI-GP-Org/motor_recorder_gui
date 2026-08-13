@@ -106,7 +106,12 @@ MqttClient::MqttClient(QObject *parent)
 {
     m_cmdTimer->setSingleShot(true);
     connect(m_cmdTimer, &QTimer::timeout, this, &MqttClient::onCmdTimeout);
-    m_yieldTimer->setInterval(50);
+    /* 500ms, not 50ms.
+       MQTTClient_yield() only matters for a client with no callbacks set; this
+       one sets them in connectToBroker(), so Paho delivers on its own thread
+       and this is a safety net rather than the delivery mechanism. At 50ms it
+       was waking the GUI thread twenty times a second to do nothing. */
+    m_yieldTimer->setInterval(500);
     connect(m_yieldTimer, &QTimer::timeout, this, [this]() {
 #ifdef HAVE_MQTT
         if (m_client) {
@@ -120,14 +125,34 @@ MqttClient::MqttClient(QObject *parent)
     connect(m_reconnectTimer, &QTimer::timeout, this, &MqttClient::attemptReconnect);
 }
 
-MqttClient::~MqttClient()
+/*
+ * Every route that lets go of a client comes through here.
+ *
+ * There were three things to release and no single place releasing them, so
+ * each path forgot a different one. connectToBroker() in particular ran
+ * MQTTClient_create() straight over m_client without destroying the previous
+ * handle, and deleted its MqttContext only on the two failure paths -- so a
+ * connection that succeeded leaked the context, and every reconnect after a
+ * dropped link leaked a whole Paho client as well. A GUI left running across a
+ * flaky broker accumulated both indefinitely.
+ */
+void MqttClient::teardownClient()
 {
 #ifdef HAVE_MQTT
     if (m_client) {
         MQTTClient_disconnect(m_client, 1000);
         MQTTClient_destroy(&m_client);
+        m_client = nullptr;
     }
 #endif
+    /* After the client is destroyed, so Paho can no longer call into it. */
+    delete m_ctx;
+    m_ctx = nullptr;
+}
+
+MqttClient::~MqttClient()
+{
+    teardownClient();
 }
 
 bool MqttClient::isConnected() const
@@ -164,6 +189,11 @@ void MqttClient::connectToBroker()
     fprintf(stderr, "[GUI] Connecting to MQTT broker %s...\n", MQTT_BROKER);
     emit logMessage("Connecting to MQTT broker...", "info");
 
+    /* Release whatever the previous attempt left behind before allocating
+       again. This is also the reconnect path, and it used to overwrite
+       m_client with a fresh handle and drop the old one on the floor. */
+    teardownClient();
+
     auto *ctx = new MqttContext;
     ctx->self = this;
     ctx->clientId = "motor_gui_" + QString::number(QDateTime::currentMSecsSinceEpoch());
@@ -175,8 +205,12 @@ void MqttClient::connectToBroker()
         emit logMessage("Failed to create MQTT client.", "error");
         setStatusText("Create failed");
         delete ctx;
+        m_client = nullptr;
         return;
     }
+
+    /* Owned from here on, and freed by teardownClient(). */
+    m_ctx = ctx;
 
     ctx->opts = MQTTClient_connectOptions_initializer;
     ctx->opts.connectTimeout = 5;
@@ -204,9 +238,7 @@ void MqttClient::connectToBroker()
         setStatusText("Connection failed");
         fprintf(stderr, "[GUI] MQTT connection failed (error %d)\n", rc);
         emit logMessage(QString("MQTT connection failed (error %1).").arg(rc), "error");
-        MQTTClient_destroy(&m_client);
-        m_client = nullptr;
-        delete ctx;
+        teardownClient();          /* destroys the client and frees m_ctx */
         scheduleReconnect();
     }
 #else
@@ -220,13 +252,7 @@ void MqttClient::disconnectFromBroker()
     m_yieldTimer->stop();
     m_reconnectTimer->stop();
     m_reconnectAttempts = 0;
-#ifdef HAVE_MQTT
-    if (m_client) {
-        MQTTClient_disconnect(m_client, 1000);
-        MQTTClient_destroy(&m_client);
-        m_client = nullptr;
-    }
-#endif
+    teardownClient();
     clearPendingCmd();
     setConnected(false);
     setStatusText("Disconnected");
@@ -238,12 +264,26 @@ void MqttClient::scheduleReconnect()
 {
     if (m_connected)
         return;
+    if (m_reconnectTimer->isActive())
+        return;                    /* checked before counting, see below */
+
     m_reconnectAttempts++;
-    int delay = m_reconnectTimer->interval();
+
+    /*
+     * Exponential backoff, 2s doubling to 30s.
+     *
+     * The interval was a fixed 5s, so a broker that stays down is hammered
+     * every five seconds for as long as the app is open, and each attempt
+     * blocks the GUI thread for the 5s connectTimeout. The counter is also
+     * bumped after the isActive() check now: it used to increment on every
+     * call including the ones that returned immediately, so the "attempt N"
+     * in the log counted calls rather than attempts.
+     */
+    int delay = qMin(30000, 2000 * (1 << qMin(m_reconnectAttempts - 1, 4)));
+    m_reconnectTimer->setInterval(delay);
+
     fprintf(stderr, "[GUI] Reconnect attempt %d scheduled in %d ms\n",
             m_reconnectAttempts, delay);
-    if (m_reconnectTimer->isActive())
-        return;
     m_reconnectTimer->start();
 }
 

@@ -5,8 +5,14 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-set(Qt6_DIR "/home/gemy/Qt/6.10.2/gcc_64/lib/cmake/Qt6" CACHE PATH "Qt6 installation directory")
-find_package(Qt6 REQUIRED COMPONENTS Quick Qml Network Widgets)
+# Qt6_DIR was hardcoded to /home/gemy/Qt/... -- one developer's home directory,
+# which meant the build worked on exactly one machine and failed everywhere else
+# with a "Qt6 not found" that pointed at the wrong problem. Pass the location in
+# the normal way instead:
+#
+#   cmake -B build -DCMAKE_PREFIX_PATH=/path/to/Qt/6.x/gcc_64
+#
+find_package(Qt6 REQUIRED COMPONENTS Quick Qml Network Widgets QuickControls2)
 
 # Find Paho MQTT C library
 find_path(PAHO_MQTT_INCLUDE_DIR MQTTClient.h)
@@ -20,11 +26,14 @@ else()
     include_directories(${PAHO_MQTT_INCLUDE_DIR})
 endif()
 
+# mainwindow.cpp/.h are gone: a second, complete, QWidget-based UI that was
+# never in this list and never referenced from anywhere, so it had never been
+# compiled. Two UIs for one app, one of them dead, is a trap for whoever reads
+# this next. It is in the git history if it is ever wanted.
 add_executable(motor_gui
     main.cpp
     mqttclient.h
     mqttclient.cpp
-    main.qml
 )
 
 target_link_libraries(motor_gui PRIVATE
@@ -32,6 +41,7 @@ target_link_libraries(motor_gui PRIVATE
     Qt6::Qml
     Qt6::Network
     Qt6::Widgets
+    Qt6::QuickControls2
 )
 
 if(WITH_MQTT)
@@ -41,7 +51,12 @@ endif()
 
 qt6_add_resources(motor_gui "resources"
     PREFIX "/"
-    FILES main.qml
+    FILES
+        main.qml
+        Theme.qml
+        AppCard.qml
+        FilledButton.qml
+        StatusPill.qml
 )
 
 install(TARGETS motor_gui RUNTIME DESTINATION bin)

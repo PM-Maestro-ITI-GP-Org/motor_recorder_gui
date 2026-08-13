@@ -1,19 +1,31 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Controls.Material
 import QtQuick.Layouts
 import QtQuick.Window
 import Qt.labs.folderlistmodel
 import MqttClient 1.0
+import App 1.0
 
 ApplicationWindow {
     id: window
     visible: true
-    width: 1100
-    height: 800
-    minimumWidth: 800
-    minimumHeight: 600
+
+    /* Bigger by default. The old 1100x800 with 9-14px type meant the file list
+       and the graph controls were both cramped and hard to read. */
+    width: 1400
+    height: 950
+    minimumWidth: 1000
+    minimumHeight: 700
     title: "Motor Data Recorder"
-    color: "#0d1117"
+    color: Theme.background
+
+    /* Light by default, with a toggle. Material.background is deliberately NOT
+       set on the window: it propagates to every Button inside and overrides
+       their own fill, which is why FilledButton paints its own. */
+    Material.theme: Theme.dark ? Material.Dark : Material.Light
+    Material.accent: Theme.accent
+    Material.primary: Theme.accent
 
     MqttClient {
         id: mqtt
@@ -310,13 +322,34 @@ ApplicationWindow {
         return (bytes / 1048576).toFixed(2) + " MB"
     }
 
+    /* Resolve a log line's colour at paint time. Kept next to logAppend so the
+       two cannot drift. */
+    function logColorFor(type) {
+        if (type === "success") return Theme.success
+        if (type === "error")   return Theme.danger
+        if (type === "warning") return Theme.warning
+        return Theme.textSecondary
+    }
+
     function logAppend(text, type) {
-        var color = "#8888ff"
-        if (type === "success") color = "#3fb950"
-        else if (type === "error") color = "#f85149"
-        else if (type === "warning") color = "#d29922"
+        /*
+         * The model stores the KIND of message, not a colour.
+         *
+         * It used to store the colour, computed here -- and computed
+         * inconsistently: the default was the JS string "#8888ff" while the
+         * others were Theme values, which are QML color objects. Whichever
+         * arrived first fixed the role's type, and every later line of the
+         * other kind was rejected outright with
+         *
+         *     Can't assign to existing role 'textColor' of different type
+         *
+         * so a run's log came out in one colour regardless of severity.
+         * Storing the type also means the log recolours when the theme is
+         * toggled, instead of keeping whatever palette was current when each
+         * line happened to be written.
+         */
         var ts = new Date().toLocaleTimeString("en_US", {hour12: false})
-        logModel.insert(0, {text: "[" + ts + "] " + text, textColor: color})
+        logModel.insert(0, {text: "[" + ts + "] " + text, logType: type || "info"})
         if (logModel.count > 200)
             logModel.remove(200, logModel.count - 200)
     }
@@ -438,11 +471,11 @@ ApplicationWindow {
         y: (parent.height - height) / 3
         width: 520
         height: 460
-        background: Rectangle { color: "#161b22"; radius: 8; border.color: "#30363d"; border.width: 1 }
+        background: Rectangle { color: Theme.surface; radius: 8; border.color: Theme.border; border.width: 1 }
 
         header: Label {
             text: folderDialog.title
-            color: "#e6edf3"; font.pixelSize: 16; font.bold: true; padding: 16
+            color: Theme.textPrimary; font.pixelSize: Theme.fontTitle; font.bold: true; padding: 16
         }
 
         property url currentFolder: (downloadDir ? "file://" + downloadDir : "file://" + mqtt.getDownloadDir()) + "/"
@@ -476,14 +509,14 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 28
                     text: folderDialog.currentFolder.toString().replace("file://", "")
-                    color: "#e6edf3"
-                    font.pixelSize: 11
+                    color: Theme.textPrimary
+                    font.pixelSize: Theme.fontSmall
                     selectByMouse: true
                     leftPadding: 6
                     verticalAlignment: Text.AlignVCenter
                     placeholderText: "/path/to/folder"
-                    placeholderTextColor: "#8b949e"
-                    background: Rectangle { color: "#0d1117"; radius: 4; border.color: "#30363d"; border.width: 1 }
+                    placeholderTextColor: Theme.textSecondary
+                    background: Rectangle { color: Theme.background; radius: 4; border.color: Theme.border; border.width: 1 }
                     onAccepted: {
                         var p = text.trim()
                         if (p === "") return
@@ -504,17 +537,17 @@ ApplicationWindow {
                         var idx = url.lastIndexOf("/")
                         folderDialog.currentFolder = url.slice(0, idx + 1)
                     }
-                    contentItem: Text { text: "\u2191"; color: "#e6edf3"; font.bold: true; font.pixelSize: 14; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle { color: parent.hovered ? "#1f6feb" : "#21262d"; radius: 4; border.color: "#30363d"; border.width: 1 }
+                    contentItem: Text { text: "\u2191"; color: Theme.textPrimary; font.bold: true; font.pixelSize: Theme.fontBody; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                    background: Rectangle { color: parent.hovered ? Theme.accent : Theme.surfaceAlt; radius: 4; border.color: Theme.border; border.width: 1 }
                 }
             }
 
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                color: "#0d1117"
+                color: Theme.background
                 radius: 6
-                border.color: "#30363d"
+                border.color: Theme.border
                 clip: true
 
                 ListView {
@@ -528,7 +561,7 @@ ApplicationWindow {
                     delegate: Rectangle {
                         width: parent ? parent.width : 0
                         height: 32
-                        color: ListView.isCurrentItem ? "#1f6feb30" : mouseArea.containsMouse ? "#1f6feb15" : "transparent"
+                        color: ListView.isCurrentItem ? "#301f6feb" : mouseArea.containsMouse ? "#151f6feb" : "transparent"
                         radius: 4
 
                         property string filePath: {
@@ -562,12 +595,12 @@ ApplicationWindow {
 
                             Text {
                                 text: model.fileIsDir ? "\u25B6" : "\u25CB"
-                                color: "#8b949e"; font.pixelSize: 12
+                                color: Theme.textSecondary; font.pixelSize: Theme.fontSmall
                             }
 
                             Text {
                                 text: model.fileName
-                                color: "#e6edf3"; font.pixelSize: 12
+                                color: Theme.textPrimary; font.pixelSize: Theme.fontSmall
                                 Layout.fillWidth: true; elide: Text.ElideRight
                             }
                         }
@@ -576,7 +609,7 @@ ApplicationWindow {
                     Text {
                         anchors.centerIn: parent
                         text: "(empty folder)"
-                        color: "#8b949e"; font.pixelSize: 13
+                        color: Theme.textSecondary; font.pixelSize: Theme.fontBody
                         visible: folderListModel.count === 0
                     }
                 }
@@ -593,8 +626,8 @@ ApplicationWindow {
                         folderDialog.selectedPath = folderDialog.currentFolder.toString().replace("file://", "")
                         folderDialog.accept()
                     }
-                    contentItem: Text { text: parent.text; color: "#ffffff"; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: 13 }
-                    background: Rectangle { color: parent.down ? "#1f6feb" : parent.hovered ? "#238636" : "#238636"; radius: 6 }
+                    contentItem: Text { text: parent.text; color: "#ffffff"; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: Theme.fontBody }
+                    background: Rectangle { color: parent.down ? Theme.accent : parent.hovered ? Theme.success : Theme.success; radius: 6 }
                     implicitHeight: 34
                 }
 
@@ -602,8 +635,8 @@ ApplicationWindow {
                     text: "Cancel"
                     Layout.fillWidth: true
                     onClicked: folderDialog.reject()
-                    contentItem: Text { text: parent.text; color: "#e6edf3"; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: 13 }
-                    background: Rectangle { color: parent.hovered ? "#1f6feb" : "#21262d"; radius: 6; border.color: "#30363d"; border.width: 1 }
+                    contentItem: Text { text: parent.text; color: Theme.textPrimary; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: Theme.fontBody }
+                    background: Rectangle { color: parent.hovered ? Theme.accent : Theme.surfaceAlt; radius: 6; border.color: Theme.border; border.width: 1 }
                     implicitHeight: 34
                 }
             }
@@ -724,17 +757,17 @@ ApplicationWindow {
 
                     Text {
                     text: "Motor Data Recorder"
-                    color: "#e6edf3"
-                    font.pixelSize: 22
+                    color: Theme.textPrimary
+                    font.pixelSize: Theme.fontDisplay
                     font.bold: true
                 }
 
                 Text {
                     id: recTimerText
-                    color: recTimerRunning ? "#3fb950" : "#484f58"
-                    font.pixelSize: 20
+                    color: recTimerRunning ? Theme.success : Theme.textDisabled
+                    font.pixelSize: Theme.fontDisplay
                     font.bold: true
-                    font.family: "Consolas"
+                    font.family: Theme.monoFamily
                     text: {
                         if (recordingSecs <= 0) return "00:00"
                         var m = Math.floor(recordingSecs / 60)
@@ -746,17 +779,17 @@ ApplicationWindow {
 
                 Text {
                     text: startRemainingSecs > 0 ? "auto-stop: " + startRemainingSecs + "s" : ""
-                    color: "#d29922"
-                    font.pixelSize: 13
+                    color: Theme.warning
+                    font.pixelSize: Theme.fontBody
                     leftPadding: 4
                 }
 
                 Item { Layout.fillWidth: true }
 
                 Rectangle {
-                    color: indicator.connected ? "#3fb95018" : "#f8514918"
+                    color: indicator.connected ? "#183fb950" : "#18f85149"
                     radius: 6
-                    border.color: indicator.connected ? "#3fb950" : "#f85149"
+                    border.color: indicator.connected ? Theme.success : Theme.danger
                     border.width: 1
                     implicitHeight: 30
                     Layout.preferredWidth: connectedBadgeRow.implicitWidth + 16
@@ -770,15 +803,28 @@ ApplicationWindow {
                             id: indicator
                             width: 8; height: 8; radius: 4
                             property bool connected: false
-                            color: connected ? "#3fb950" : "#f85149"
+                            color: connected ? Theme.success : Theme.danger
                         }
                         Text {
                             text: indicator.connected ? "Connected" : "Disconnected"
-                            color: indicator.connected ? "#3fb950" : "#f85149"
-                            font.pixelSize: 12
+                            color: indicator.connected ? Theme.success : Theme.danger
+                            font.pixelSize: Theme.fontSmall
                             font.bold: true
                         }
                     }
+                }
+
+                /* Light is the default; this is the way back to dark for anyone
+                   who was used to it. */
+                ToolButton {
+                    text: Theme.dark ? "☀" : "☾"
+                    font.pixelSize: Theme.fontTitle
+                    implicitWidth: 44
+                    implicitHeight: 44
+                    onClicked: Theme.dark = !Theme.dark
+                    ToolTip.visible: hovered
+                    ToolTip.text: Theme.dark ? "Switch to light theme"
+                                             : "Switch to dark theme"
                 }
             }
 
@@ -787,9 +833,9 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 visible: false
                 Layout.preferredHeight: 48
-                color: "#161b22"
+                color: Theme.surface
                 radius: 8
-                border.color: "#30363d"
+                border.color: Theme.border
 
                 ColumnLayout {
                     anchors.fill: parent
@@ -801,18 +847,18 @@ ApplicationWindow {
                         rowSpacing: 0
                         columnSpacing: 8
 
-                        Text { text: "File:"; color: "#8b949e"; font.pixelSize: 11 }
-                        Text { text: metaFile; color: "#e6edf3"; font.pixelSize: 11; Layout.fillWidth: true; elide: Text.ElideMiddle; Layout.maximumWidth: 200 }
-                        Text { text: "Duration:"; color: "#8b949e"; font.pixelSize: 11 }
-                        Text { text: metaSpan; color: "#e6edf3"; font.pixelSize: 11 }
-                        Text { text: "Rows:"; color: "#8b949e"; font.pixelSize: 11 }
-                        Text { text: metaRows; color: "#e6edf3"; font.pixelSize: 11 }
-                        Text { text: "Drops:"; color: "#8b949e"; font.pixelSize: 11 }
-                        Text { text: metaDrops; color: "#e6edf3"; font.pixelSize: 11 }
-                        Text { text: "Block:"; color: "#8b949e"; font.pixelSize: 11 }
-                        Text { text: metaBlockDrops; color: "#e6edf3"; font.pixelSize: 11 }
-                        Text { text: "Stalled:"; color: "#8b949e"; font.pixelSize: 11 }
-                        Text { text: metaStalled; color: "#e6edf3"; font.pixelSize: 11 }
+                        Text { text: "File:"; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+                        Text { text: metaFile; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; Layout.fillWidth: true; elide: Text.ElideMiddle; Layout.maximumWidth: 200 }
+                        Text { text: "Duration:"; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+                        Text { text: metaSpan; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall }
+                        Text { text: "Rows:"; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+                        Text { text: metaRows; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall }
+                        Text { text: "Drops:"; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+                        Text { text: metaDrops; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall }
+                        Text { text: "Block:"; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+                        Text { text: metaBlockDrops; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall }
+                        Text { text: "Stalled:"; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+                        Text { text: metaStalled; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall }
                     }
                 }
             }
@@ -837,14 +883,14 @@ ApplicationWindow {
                     }
                     contentItem: Text {
                         text: btnConnect.text
-                        color: btnConnect.enabled ? "#e6edf3" : "#484f58"
+                        color: btnConnect.enabled ? Theme.textPrimary : Theme.textDisabled
                         font.bold: true
-                        font.pixelSize: 14
+                        font.pixelSize: Theme.fontBody
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
                     }
                     background: Rectangle {
-                        color: btnConnect.down ? "#1f6feb" : btnConnect.hovered ? "#238636" : btnConnect.enabled ? "#238636" : "#21262d"
+                        color: btnConnect.down ? Theme.accent : btnConnect.hovered ? Theme.success : btnConnect.enabled ? Theme.success : Theme.surfaceAlt
                         radius: 8
                     }
                 }
@@ -857,13 +903,13 @@ ApplicationWindow {
                     Layout.preferredHeight: 48
                     onClicked: startDialog.open()
                     contentItem: Text {
-                        text: btnStart.text; color: btnStart.enabled ? "#e6edf3" : "#484f58"; font.bold: true; font.pixelSize: 14
+                        text: btnStart.text; color: btnStart.enabled ? Theme.textPrimary : Theme.textDisabled; font.bold: true; font.pixelSize: Theme.fontBody
                         horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
                     }
                     background: Rectangle {
-                        color: btnStart.down ? "#1f6feb" : btnStart.hovered ? "#1f6feb" : btnStart.enabled ? "#21262d" : "#161b22"
+                        color: btnStart.down ? Theme.accent : btnStart.hovered ? Theme.accent : btnStart.enabled ? Theme.surfaceAlt : Theme.surface
                     radius: 8
-                    border.color: btnStart.enabled ? "#58a6ff" : "transparent"
+                    border.color: btnStart.enabled ? Theme.accentHover : "transparent"
                     border.width: 1
                 }
             }
@@ -884,13 +930,13 @@ ApplicationWindow {
                     logAppend("Sent STOP command.", "info")
                 }
                 contentItem: Text {
-                    text: btnStop.text; color: btnStop.enabled ? "#e6edf3" : "#484f58"; font.bold: true; font.pixelSize: 14
+                    text: btnStop.text; color: btnStop.enabled ? Theme.textPrimary : Theme.textDisabled; font.bold: true; font.pixelSize: Theme.fontBody
                     horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
                 }
                 background: Rectangle {
-                    color: btnStop.down ? "#da3633" : btnStop.hovered ? "#da3633" : btnStop.enabled ? "#21262d" : "#161b22"
+                    color: btnStop.down ? Theme.danger : btnStop.hovered ? Theme.danger : btnStop.enabled ? Theme.surfaceAlt : Theme.surface
                     radius: 8
-                    border.color: btnStop.enabled ? "#f85149" : "transparent"
+                    border.color: btnStop.enabled ? Theme.danger : "transparent"
                     border.width: 1
                 }
             }
@@ -903,13 +949,13 @@ ApplicationWindow {
                 Layout.preferredHeight: 48
                 onClicked: downloadDialog.open()
                 contentItem: Text {
-                    text: btnDownload.text; color: btnDownload.enabled ? "#e6edf3" : "#484f58"; font.bold: true; font.pixelSize: 14
+                    text: btnDownload.text; color: btnDownload.enabled ? Theme.textPrimary : Theme.textDisabled; font.bold: true; font.pixelSize: Theme.fontBody
                     horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
                 }
                 background: Rectangle {
-                    color: btnDownload.down ? "#1f6feb" : btnDownload.hovered ? "#1f6feb" : btnDownload.enabled ? "#21262d" : "#161b22"
+                    color: btnDownload.down ? Theme.accent : btnDownload.hovered ? Theme.accent : btnDownload.enabled ? Theme.surfaceAlt : Theme.surface
                     radius: 8
-                    border.color: btnDownload.enabled ? "#58a6ff" : "transparent"
+                    border.color: btnDownload.enabled ? Theme.accentHover : "transparent"
                     border.width: 1
                 }
             }
@@ -930,14 +976,89 @@ ApplicationWindow {
                     }
                 }
                 contentItem: Text {
-                    text: btnGraphs.text; color: btnGraphs.enabled ? "#e6edf3" : "#484f58"; font.bold: true; font.pixelSize: 14
+                    text: btnGraphs.text; color: btnGraphs.enabled ? Theme.textPrimary : Theme.textDisabled; font.bold: true; font.pixelSize: Theme.fontBody
                     horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
                 }
                 background: Rectangle {
-                    color: btnGraphs.down ? "#1f6feb" : btnGraphs.hovered ? "#1f6feb" : btnGraphs.enabled ? "#21262d" : "#161b22"
+                    color: btnGraphs.down ? Theme.accent : btnGraphs.hovered ? Theme.accent : btnGraphs.enabled ? Theme.surfaceAlt : Theme.surface
                     radius: 8
-                    border.color: btnGraphs.enabled ? "#58a6ff" : "transparent"
+                    border.color: btnGraphs.enabled ? Theme.accentHover : "transparent"
                     border.width: 1
+                }
+            }
+        }
+
+        /*
+         * Live telemetry.
+         *
+         * dataModel was being filled on every incoming row -- onDataReceived
+         * splits the 13 CSV fields and writes them in -- and then displayed
+         * nowhere at all: nothing in the file bound to it. So the recorder
+         * streamed motor data to the GUI continuously and the GUI dropped it on
+         * the floor, which is also what left the middle of the window as one
+         * large empty rectangle.
+         *
+         * The field order is the one mqtt_client.c publishes:
+         *   ts, current[0..7], vib_x, vib_y, vib_z, rpm
+         */
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 190
+            color: Theme.surface
+            radius: Theme.radius
+            border.color: Theme.border
+            border.width: 1
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: Theme.spacing
+                spacing: Theme.spacingTight
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Text {
+                        text: "Live telemetry"
+                        color: Theme.textPrimary
+                        font.pixelSize: Theme.fontTitle
+                        font.weight: Font.DemiBold
+                    }
+                    Item { Layout.fillWidth: true }
+                    StatusPill {
+                        text: recTimerRunning ? "streaming" : "idle"
+                        tone: recTimerRunning ? "recording" : "neutral"
+                        pulse: recTimerRunning
+                    }
+                }
+
+                GridLayout {
+                    Layout.fillWidth: true
+                    columns: 7
+                    rowSpacing: Theme.spacingTight
+                    columnSpacing: Theme.spacing
+
+                    Repeater {
+                        model: dataModel
+                        delegate: ColumnLayout {
+                            spacing: 2
+                            Layout.fillWidth: true
+                            Text {
+                                text: window.channelLabels[index] !== undefined
+                                      ? window.channelLabels[index] : ("ch" + index)
+                                color: Theme.textSecondary
+                                font.pixelSize: Theme.fontTiny
+                                font.weight: Font.DemiBold
+                            }
+                            Text {
+                                text: model.value
+                                color: model.value === "---" ? Theme.textDisabled
+                                                             : Theme.textPrimary
+                                font.family: Theme.monoFamily
+                                font.pixelSize: Theme.fontBody
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -945,9 +1066,9 @@ ApplicationWindow {
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            color: "#161b22"
+            color: Theme.surface
             radius: 8
-            border.color: "#30363d"
+            border.color: Theme.border
             clip: true
 
             ListView {
@@ -955,8 +1076,13 @@ ApplicationWindow {
                 anchors.fill: parent
                 anchors.margins: 8
                 model: logModel
-                spacing: 1
-                verticalLayoutDirection: ListView.BottomToTop
+                spacing: 2
+                /* Newest first, filling from the top.
+                   It was BottomToTop while logAppend inserts at index 0, which
+                   put the newest line at the BOTTOM and left the panel as a
+                   tall empty rectangle with a few lines stuck along its lower
+                   edge -- the emptiest part of the window sat where the eye
+                   goes first. Same ordering, drawn the way it reads. */
                 boundsBehavior: Flickable.StopAtBounds
                 clip: true
 
@@ -966,15 +1092,19 @@ ApplicationWindow {
                     background: Rectangle { color: "transparent" }
                     contentItem: Rectangle {
                         radius: 4
-                        color: "#484f58"
+                        color: Theme.textDisabled
                     }
                 }
 
                 delegate: Text {
                     text: model.text
-                    color: model.textColor
-                    font.family: "Consolas"
-                    font.pixelSize: 11
+                    color: window.logColorFor(model.logType)
+                    /* "Consolas" is a Windows font; on Linux this silently fell
+                       back to whatever the default sans was, so the log was not
+                       monospaced and columns did not line up. Theme.monoFamily
+                       names a font that ships with the platform. */
+                    font.family: Theme.monoFamily
+                    font.pixelSize: Theme.fontSmall
                     wrapMode: Text.Wrap
                 }
             }
@@ -985,9 +1115,9 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.preferredHeight: 54
             visible: downloadQueueActive && downloadQueue.length > 0
-            color: "#161b22"
+            color: Theme.surface
             radius: 8
-            border.color: "#30363d"
+            border.color: Theme.border
             clip: true
 
             ColumnLayout {
@@ -1006,8 +1136,8 @@ ApplicationWindow {
                                 return downloadQueue[downloadQueueIndex].file
                             return ""
                         }
-                        color: "#e6edf3"
-                        font.pixelSize: 11
+                        color: Theme.textPrimary
+                        font.pixelSize: Theme.fontSmall
                         font.bold: true
                         elide: Text.ElideMiddle
                         Layout.fillWidth: true
@@ -1020,8 +1150,8 @@ ApplicationWindow {
                                 if (downloadQueue[i].status === "done") done++
                             return done + "/" + downloadQueue.length + " complete"
                         }
-                        color: "#8b949e"
-                        font.pixelSize: 11
+                        color: Theme.textSecondary
+                        font.pixelSize: Theme.fontSmall
                     }
                 }
 
@@ -1033,14 +1163,14 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 8
                         radius: 4
-                        color: "#0d1117"
+                        color: Theme.background
                         clip: true
 
                         Rectangle {
                             id: uploadBar
                             height: parent.height
                             width: 0
-                            color: "#58a6ff"
+                            color: Theme.accentHover
                             radius: 4
                         }
                     }
@@ -1048,8 +1178,8 @@ ApplicationWindow {
                     Text {
                         id: uploadLabel
                         text: "Upload 0%"
-                        color: "#58a6ff"
-                        font.pixelSize: 10
+                        color: Theme.accentHover
+                        font.pixelSize: Theme.fontTiny
                         font.bold: true
                         Layout.preferredWidth: 80
                     }
@@ -1063,14 +1193,14 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 8
                         radius: 4
-                        color: "#0d1117"
+                        color: Theme.background
                         clip: true
 
                         Rectangle {
                             id: downloadBar
                             height: parent.height
                             width: 0
-                            color: "#3fb950"
+                            color: Theme.success
                             radius: 4
                         }
                     }
@@ -1078,8 +1208,8 @@ ApplicationWindow {
                     Text {
                         id: downloadLabel
                         text: "Download 0%"
-                        color: "#3fb950"
-                        font.pixelSize: 10
+                        color: Theme.success
+                        font.pixelSize: Theme.fontTiny
                         font.bold: true
                         Layout.preferredWidth: 80
                     }
@@ -1094,31 +1224,31 @@ ApplicationWindow {
             Text {
                 id: statusText
                 text: "Ready"
-                color: "#8b949e"
-                font.pixelSize: 11
+                color: Theme.textSecondary
+                font.pixelSize: Theme.fontSmall
                 Layout.fillWidth: true
             }
 
             Text {
                 text: "Save to:"
-                color: "#8b949e"
-                font.pixelSize: 10
+                color: Theme.textSecondary
+                font.pixelSize: Theme.fontTiny
             }
 
             Rectangle {
                 Layout.preferredWidth: 180
                 Layout.preferredHeight: 20
-                color: "#161b22"
+                color: Theme.surface
                 radius: 4
-                border.color: "#30363d"
+                border.color: Theme.border
                 border.width: 1
                 clip: true
 
                 TextInput {
                     id: downloadDirInput
                     text: downloadDir
-                    color: "#e6edf3"
-                    font.pixelSize: 10
+                    color: Theme.textPrimary
+                    font.pixelSize: Theme.fontTiny
                     anchors.left: parent.left
                     anchors.leftMargin: 4
                     anchors.verticalCenter: parent.verticalCenter
@@ -1136,8 +1266,8 @@ ApplicationWindow {
                     folderDialog.open()
                     console.log("Folder dialog opened")
                 }
-                contentItem: Text { text: parent.text; color: "#e6edf3"; font.pixelSize: 9; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                background: Rectangle { color: parent.hovered ? "#1f6feb" : "#21262d"; radius: 4; border.color: "#30363d"; border.width: 1 }
+                contentItem: Text { text: parent.text; color: Theme.textPrimary; font.pixelSize: Theme.fontTiny; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                background: Rectangle { color: parent.hovered ? Theme.accent : Theme.surfaceAlt; radius: 4; border.color: Theme.border; border.width: 1 }
             }
         }
     }
@@ -1175,12 +1305,12 @@ ApplicationWindow {
                         text: "\u2190 Back"
                         implicitWidth: 70
                         onClicked: showGraph = false
-                        contentItem: Text { text: parent.text; color: "#e6edf3"; font.bold: true; font.pixelSize: 12; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                        background: Rectangle { color: parent.hovered ? "#1f6feb" : "#21262d"; radius: 4; border.color: "#30363d"; border.width: 1 }
+                        contentItem: Text { text: parent.text; color: Theme.textPrimary; font.bold: true; font.pixelSize: Theme.fontSmall; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                        background: Rectangle { color: parent.hovered ? Theme.accent : Theme.surfaceAlt; radius: 4; border.color: Theme.border; border.width: 1 }
                         implicitHeight: 28
                     }
 
-                    Text { text: "File:"; color: "#8b949e"; font.pixelSize: 12 }
+                    Text { text: "File:"; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
 
                     ComboBox {
                         id: graphFileCombo
@@ -1191,28 +1321,28 @@ ApplicationWindow {
                             if (currentIndex >= 0)
                                 loadSelectedFile(currentIndex)
                         }
-                        background: Rectangle { color: "#161b22"; radius: 4; border.color: "#30363d"; border.width: 1 }
-                        contentItem: Text { text: graphFileCombo.currentText; color: "#e6edf3"; x: 8; font.pixelSize: 12 }
-                        indicator: Text { text: "\u25bc"; color: "#8b949e"; anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter }
+                        background: Rectangle { color: Theme.surface; radius: 4; border.color: Theme.border; border.width: 1 }
+                        contentItem: Text { text: graphFileCombo.currentText; color: Theme.textPrimary; x: 8; font.pixelSize: Theme.fontSmall }
+                        indicator: Text { text: "\u25bc"; color: Theme.textSecondary; anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter }
                     }
 
-                    Text { text: "From:"; color: "#8b949e"; font.pixelSize: 12 }
+                    Text { text: "From:"; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
                     TextField {
                         id: graphStartField
                         implicitWidth: 70
-                        color: "#e6edf3"
-                        background: Rectangle { color: "#161b22"; radius: 4; border.color: "#30363d"; border.width: 1 }
-                        leftPadding: 6; font.pixelSize: 12
+                        color: Theme.textPrimary
+                        background: Rectangle { color: Theme.surface; radius: 4; border.color: Theme.border; border.width: 1 }
+                        leftPadding: 6; font.pixelSize: Theme.fontSmall
                         validator: IntValidator { bottom: 0 }
                     }
 
-                    Text { text: "To:"; color: "#8b949e"; font.pixelSize: 12 }
+                    Text { text: "To:"; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
                     TextField {
                         id: graphEndField
                         implicitWidth: 70
-                        color: "#e6edf3"
-                        background: Rectangle { color: "#161b22"; radius: 4; border.color: "#30363d"; border.width: 1 }
-                        leftPadding: 6; font.pixelSize: 12
+                        color: Theme.textPrimary
+                        background: Rectangle { color: Theme.surface; radius: 4; border.color: Theme.border; border.width: 1 }
+                        leftPadding: 6; font.pixelSize: Theme.fontSmall
                         validator: IntValidator { bottom: 0 }
                     }
 
@@ -1227,8 +1357,8 @@ ApplicationWindow {
                             else graphEndRow = csvTotalRows
                             chartCanvas.requestPaint()
                         }
-                        contentItem: Text { text: parent.text; color: "#e6edf3"; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: 11 }
-                        background: Rectangle { color: parent.hovered ? "#1f6feb" : "#21262d"; radius: 4; border.color: "#30363d"; border.width: 1 }
+                        contentItem: Text { text: parent.text; color: Theme.textPrimary; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: Theme.fontSmall }
+                        background: Rectangle { color: parent.hovered ? Theme.accent : Theme.surfaceAlt; radius: 4; border.color: Theme.border; border.width: 1 }
                         implicitHeight: 28
                     }
                 }
@@ -1236,9 +1366,9 @@ ApplicationWindow {
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    color: "#161b22"
+                    color: Theme.surface
                     radius: 6
-                    border.color: "#30363d"
+                    border.color: Theme.border
                     border.width: 1
                     clip: true
 
@@ -1253,7 +1383,7 @@ ApplicationWindow {
                             ctx.clearRect(0, 0, width, height)
                             var data = csvData
                             if (data.length < 2) {
-                                ctx.fillStyle = "#8b949e"; ctx.font = "14px monospace"
+                                ctx.fillStyle = Theme.textSecondary; ctx.font = "14px monospace"
                                 ctx.fillText("No data to display", width/2 - 70, height/2)
                                 return
                             }
@@ -1294,7 +1424,7 @@ ApplicationWindow {
                             if (yMin === Infinity) { yMin = 0; yMax = 1000 }
                             var pad = (yMax - yMin) * 0.1 || 1; yMin -= pad; yMax += pad
 
-                            ctx.strokeStyle = "#30363d"; ctx.lineWidth = 0.5
+                            ctx.strokeStyle = Theme.border; ctx.lineWidth = 0.5
                             var yTicks = Math.max(6, Math.min(10, Math.floor(pH / 18)))
                             var xTicks = Math.max(6, Math.min(10, Math.floor(pW / 55)))
                             function fmtTick(v) {
@@ -1307,7 +1437,7 @@ ApplicationWindow {
                                 var yFrac = gy / yTicks
                                 var yY = mT + pH * (1 - yFrac)
                                 ctx.beginPath(); ctx.moveTo(mL, yY); ctx.lineTo(width - mR, yY); ctx.stroke()
-                                ctx.fillStyle = "#8b949e"; ctx.font = "9px monospace"
+                                ctx.fillStyle = Theme.textSecondary; ctx.font = "9px monospace"
                                 var yLbl = fmtTick(yMin + (yMax - yMin) * yFrac)
                                 ctx.fillText(yLbl, mL - 4 - ctx.measureText(yLbl).width, yY + 3)
                             }
@@ -1315,11 +1445,11 @@ ApplicationWindow {
                                 var xFrac = gx / xTicks
                                 var xX = mL + pW * xFrac
                                 ctx.beginPath(); ctx.moveTo(xX, mT); ctx.lineTo(xX, mT + pH); ctx.stroke()
-                                ctx.fillStyle = "#8b949e"; ctx.font = "9px monospace"
+                                ctx.fillStyle = Theme.textSecondary; ctx.font = "9px monospace"
                                 var xLbl = (startRow + visibleRange * xFrac).toFixed(0)
                                 ctx.fillText(xLbl, xX - ctx.measureText(xLbl).width / 2, height - 5)
                             }
-                            ctx.fillStyle = "#8b949e"; ctx.font = "9px monospace"
+                            ctx.fillStyle = Theme.textSecondary; ctx.font = "9px monospace"
                             ctx.fillText("Row #", mL + pW / 2 - 15, height - 22)
 
                             for (var ci = 1; ci < Math.min(nCols, data[sIdx].length); ci++) {
@@ -1361,8 +1491,8 @@ ApplicationWindow {
                             chartCanvas.zoomMax = csvTotalRows > 0 ? csvTotalRows : 1
                             chartCanvas.requestPaint()
                         }
-                        contentItem: Text { text: parent.text; color: "#e6edf3"; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: 11 }
-                        background: Rectangle { color: parent.hovered ? "#1f6feb" : "#21262d"; radius: 4; border.color: "#30363d"; border.width: 1 }
+                        contentItem: Text { text: parent.text; color: Theme.textPrimary; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: Theme.fontSmall }
+                        background: Rectangle { color: parent.hovered ? Theme.accent : Theme.surfaceAlt; radius: 4; border.color: Theme.border; border.width: 1 }
                     }
                 }
             }
@@ -1370,9 +1500,9 @@ ApplicationWindow {
             Rectangle {
                 Layout.preferredWidth: 170
                 Layout.fillHeight: true
-                color: "#161b22"
+                color: Theme.surface
                 radius: 6
-                border.color: "#30363d"
+                border.color: Theme.border
                 visible: csvColumns.length > 0
                 clip: true
 
@@ -1381,9 +1511,9 @@ ApplicationWindow {
                     anchors.margins: 8
                     spacing: 4
 
-                    Text { text: "Data Columns"; color: "#e6edf3"; font.bold: true; font.pixelSize: 12 }
+                    Text { text: "Data Columns"; color: Theme.textPrimary; font.bold: true; font.pixelSize: Theme.fontSmall }
 
-                    Rectangle { Layout.fillWidth: true; height: 1; color: "#30363d" }
+                    Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
 
                     ListView {
                         Layout.fillWidth: true
@@ -1406,7 +1536,7 @@ ApplicationWindow {
                                 indicator: Rectangle {
                                     implicitWidth: 14; implicitHeight: 14
                                     x: cb.leftPadding; y: parent.height / 2 - 7
-                                    radius: 3; color: "transparent"; border.color: "#58a6ff"; border.width: 1
+                                    radius: 3; color: "transparent"; border.color: Theme.accentHover; border.width: 1
                                     Rectangle {
                                         anchors.centerIn: parent
                                         width: 10; height: 10; radius: 2
@@ -1420,7 +1550,7 @@ ApplicationWindow {
                             }
                             Text {
                                 text: index === 0 ? csvColumns[index] + " (x)" : csvColumns[index]
-                                color: index === 0 ? "#8b949e" : "#e6edf3"; font.pixelSize: 11
+                                color: index === 0 ? Theme.textSecondary : Theme.textPrimary; font.pixelSize: Theme.fontSmall
                                 Layout.fillWidth: true; elide: Text.ElideRight
                             }
                         }
@@ -1437,12 +1567,12 @@ ApplicationWindow {
         x: (parent.width - width) / 2
         y: (parent.height - height) / 3
         width: 380
-        background: Rectangle { color: "#161b22"; radius: 8; border.color: "#30363d"; border.width: 1 }
+        background: Rectangle { color: Theme.surface; radius: 8; border.color: Theme.border; border.width: 1 }
 
         header: Label {
             text: "Start Recording"
-            color: "#e6edf3"
-            font.pixelSize: 16
+            color: Theme.textPrimary
+            font.pixelSize: Theme.fontTitle
             font.bold: true
             padding: 16
         }
@@ -1456,12 +1586,12 @@ ApplicationWindow {
                 implicitWidth: 80
                 onClicked: startDialog.close()
                 contentItem: Text {
-                    text: parent.text; color: "#e6edf3"; font.bold: true; font.pixelSize: 13
+                    text: parent.text; color: Theme.textPrimary; font.bold: true; font.pixelSize: Theme.fontBody
                     horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
                 }
                 background: Rectangle {
-                    color: parent.hovered ? "#1f6feb" : "#21262d"; radius: 6
-                    border.color: "#30363d"; border.width: 1
+                    color: parent.hovered ? Theme.accent : Theme.surfaceAlt; radius: 6
+                    border.color: Theme.border; border.width: 1
                 }
             }
             Button {
@@ -1469,11 +1599,11 @@ ApplicationWindow {
                 implicitWidth: 80
                 onClicked: startDialog.accept()
                 contentItem: Text {
-                    text: parent.text; color: "#ffffff"; font.bold: true; font.pixelSize: 13
+                    text: parent.text; color: "#ffffff"; font.bold: true; font.pixelSize: Theme.fontBody
                     horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
                 }
                 background: Rectangle {
-                    color: parent.down ? "#1f6feb" : parent.hovered ? "#238636" : "#238636"; radius: 6
+                    color: parent.down ? Theme.accent : parent.hovered ? Theme.success : Theme.success; radius: 6
                 }
             }
         }
@@ -1507,28 +1637,28 @@ ApplicationWindow {
             anchors.margins: 16
             spacing: 12
 
-            Text { text: "Recording Name (optional):"; color: "#8b949e"; font.pixelSize: 12 }
+            Text { text: "Recording Name (optional):"; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
             TextField {
                 id: startNameField
                 Layout.fillWidth: true
                 text: "motor_test_1"
                 placeholderText: "e.g. motor_test_1"
-                color: "#e6edf3"
-                background: Rectangle { color: "#0d1117"; radius: 4; border.color: "#30363d"; border.width: 1 }
+                color: Theme.textPrimary
+                background: Rectangle { color: Theme.background; radius: 4; border.color: Theme.border; border.width: 1 }
                 leftPadding: 8
-                font.pixelSize: 13
+                font.pixelSize: Theme.fontBody
             }
 
-            Text { text: "Duration (seconds, 0 = manual stop):"; color: "#8b949e"; font.pixelSize: 12 }
+            Text { text: "Duration (seconds, 0 = manual stop):"; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
             TextField {
                 id: startDurationField
                 Layout.fillWidth: true
                 text: "0"
                 placeholderText: "0 = manual stop"
-                color: "#e6edf3"
-                background: Rectangle { color: "#0d1117"; radius: 4; border.color: "#30363d"; border.width: 1 }
+                color: Theme.textPrimary
+                background: Rectangle { color: Theme.background; radius: 4; border.color: Theme.border; border.width: 1 }
                 leftPadding: 8
-                font.pixelSize: 13
+                font.pixelSize: Theme.fontBody
                 validator: IntValidator { bottom: 0; top: 86400 }
             }
         }
@@ -1542,12 +1672,12 @@ ApplicationWindow {
         y: (parent.height - height) / 3
         width: 520
         height: 460
-        background: Rectangle { color: "#161b22"; radius: 8; border.color: "#30363d"; border.width: 1 }
+        background: Rectangle { color: Theme.surface; radius: 8; border.color: Theme.border; border.width: 1 }
 
         header: Label {
             text: "Recording Files on Device"
-            color: "#e6edf3"
-            font.pixelSize: 16
+            color: Theme.textPrimary
+            font.pixelSize: Theme.fontTitle
             font.bold: true
             padding: 16
         }
@@ -1563,8 +1693,8 @@ ApplicationWindow {
 
                 Text {
                     text: fileListLoading ? "Loading..." : fileListModel.count + " file(s) found"
-                    color: "#8b949e"
-                    font.pixelSize: 12
+                    color: Theme.textSecondary
+                    font.pixelSize: Theme.fontSmall
                 }
 
                 Item { Layout.fillWidth: true }
@@ -1576,8 +1706,8 @@ ApplicationWindow {
                         for (var i = 0; i < fileListModel.count; ++i)
                             fileListModel.set(i, {checked: true})
                     }
-                    contentItem: Text { text: parent.text; color: "#e6edf3"; font.pixelSize: 11; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle { color: parent.hovered ? "#1f6feb" : "#21262d"; radius: 4; border.color: "#30363d"; border.width: 1 }
+                    contentItem: Text { text: parent.text; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                    background: Rectangle { color: parent.hovered ? Theme.accent : Theme.surfaceAlt; radius: 4; border.color: Theme.border; border.width: 1 }
                     implicitHeight: 28
                 }
 
@@ -1588,8 +1718,8 @@ ApplicationWindow {
                         for (var i = 0; i < fileListModel.count; ++i)
                             fileListModel.set(i, {checked: false})
                     }
-                    contentItem: Text { text: parent.text; color: "#e6edf3"; font.pixelSize: 11; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle { color: parent.hovered ? "#1f6feb" : "#21262d"; radius: 4; border.color: "#30363d"; border.width: 1 }
+                    contentItem: Text { text: parent.text; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                    background: Rectangle { color: parent.hovered ? Theme.accent : Theme.surfaceAlt; radius: 4; border.color: Theme.border; border.width: 1 }
                     implicitHeight: 28
                 }
 
@@ -1601,8 +1731,8 @@ ApplicationWindow {
                         fileListModel.clear()
                         mqtt.requestFileList()
                     }
-                    contentItem: Text { text: parent.text; color: "#e6edf3"; font.pixelSize: 11; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle { color: parent.hovered ? "#1f6feb" : "#21262d"; radius: 4; border.color: "#30363d"; border.width: 1 }
+                    contentItem: Text { text: parent.text; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                    background: Rectangle { color: parent.hovered ? Theme.accent : Theme.surfaceAlt; radius: 4; border.color: Theme.border; border.width: 1 }
                     implicitHeight: 28
                 }
             }
@@ -1610,9 +1740,9 @@ ApplicationWindow {
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                color: "#0d1117"
+                color: Theme.background
                 radius: 6
-                border.color: "#30363d"
+                border.color: Theme.border
                 clip: true
 
                 ListView {
@@ -1624,7 +1754,7 @@ ApplicationWindow {
                     delegate: Rectangle {
                         width: parent ? parent.width : 0
                         height: 36
-                        color: checked ? "#1f6feb20" : "transparent"
+                        color: checked ? "#201f6feb" : "transparent"
                         radius: 4
 
                         RowLayout {
@@ -1640,27 +1770,27 @@ ApplicationWindow {
                                 indicator: Rectangle {
                                     implicitWidth: 16; implicitHeight: 16
                                     x: itemCheck.leftPadding; y: parent.height / 2 - 8
-                                    radius: 3; color: "transparent"; border.color: "#58a6ff"; border.width: 1
+                                    radius: 3; color: "transparent"; border.color: Theme.accentHover; border.width: 1
                                     Rectangle {
                                         anchors.centerIn: parent
                                         width: 10; height: 10; radius: 2
-                                        color: itemCheck.checked ? "#58a6ff" : "transparent"
+                                        color: itemCheck.checked ? Theme.accentHover : "transparent"
                                     }
                                 }
                             }
 
                             Text {
                                 text: model.fileName
-                                color: "#e6edf3"
-                                font.pixelSize: 12
+                                color: Theme.textPrimary
+                                font.pixelSize: Theme.fontSmall
                                 Layout.fillWidth: true
                                 elide: Text.ElideMiddle
                             }
 
                             Text {
                                 text: model.sizeStr
-                                color: "#8b949e"
-                                font.pixelSize: 11
+                                color: Theme.textSecondary
+                                font.pixelSize: Theme.fontSmall
                                 Layout.preferredWidth: 80
                                 horizontalAlignment: Text.AlignRight
                             }
@@ -1670,8 +1800,8 @@ ApplicationWindow {
                     Text {
                         anchors.centerIn: parent
                         text: fileListLoading ? "Requesting list..." : "Press Refresh to load files"
-                        color: "#8b949e"
-                        font.pixelSize: 13
+                        color: Theme.textSecondary
+                        font.pixelSize: Theme.fontBody
                         visible: fileListModel.count === 0
                     }
                 }
@@ -1702,8 +1832,8 @@ ApplicationWindow {
                         downloadDialog.close()
                         processDownloadQueue()
                     }
-                    contentItem: Text { text: parent.text; color: "#e6edf3"; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle { color: parent.down ? "#238636" : parent.hovered ? "#238636" : parent.enabled ? "#1f6feb" : "#21262d"; radius: 6; border.color: parent.enabled ? "#1f6feb" : "#30363d"; border.width: 1 }
+                    contentItem: Text { text: parent.text; color: Theme.textPrimary; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                    background: Rectangle { color: parent.down ? Theme.success : parent.hovered ? Theme.success : parent.enabled ? Theme.accent : Theme.surfaceAlt; radius: 6; border.color: parent.enabled ? Theme.accent : Theme.border; border.width: 1 }
                     implicitHeight: 34
                 }
 
@@ -1724,13 +1854,23 @@ ApplicationWindow {
                         mqtt.requestFileList()
                         logAppend("Delete commands sent.", "info")
                     }
-                    contentItem: Text { text: parent.text; color: "#e6edf3"; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle { color: parent.down ? "#da3633" : parent.hovered ? "#da3633" : parent.enabled ? "#21262d" : "#161b22"; radius: 6; border.color: parent.enabled ? "#f85149" : "#30363d"; border.width: 1 }
+                    contentItem: Text { text: parent.text; color: Theme.textPrimary; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                    background: Rectangle { color: parent.down ? Theme.danger : parent.hovered ? Theme.danger : parent.enabled ? Theme.surfaceAlt : Theme.surface; radius: 6; border.color: parent.enabled ? Theme.danger : Theme.border; border.width: 1 }
                     implicitHeight: 34
                 }
             }
         }
     }
+
+    /* Names for the 13 fields mqtt_client.c puts on the data topic, in its
+       order: timestamp, eight current channels, three vibration axes, rpm.
+       The model carried bare values with no labels, so even had it been shown,
+       the numbers would have meant nothing. */
+    readonly property var channelLabels: [
+        "TIMESTAMP", "CURRENT 0", "CURRENT 1", "CURRENT 2", "CURRENT 3",
+        "CURRENT 4", "CURRENT 5", "CURRENT 6", "CURRENT 7",
+        "VIB X", "VIB Y", "VIB Z", "RPM"
+    ]
 
     Component.onCompleted: {
         for (var i = 0; i < 13; ++i)
