@@ -25,14 +25,17 @@ int main(int argc, char *argv[])
     /*
      * A QML error used to be completely silent: engine.load() returned, main()
      * returned app.exec(), and the user got a process with no window and no
-     * message. Both halves are reported now -- objectCreationFailed catches a
-     * failure during creation, and the empty-rootObjects check catches a file
-     * that could not be parsed at all.
+     * message. Both halves are reported now -- objectCreated with a null object
+     * catches a failure during creation, and the empty-rootObjects check catches
+     * a file that could not be parsed at all. (objectCreationFailed would say
+     * the same thing more directly, but it needs Qt 6.4; this builds on 6.2.)
      */
-    QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed,
-                     &app, []() {
-                         fprintf(stderr, "[GUI] FATAL: QML object creation failed\n");
-                         QCoreApplication::exit(1);
+    QObject::connect(&engine, &QQmlApplicationEngine::objectCreated,
+                     &app, [](QObject *obj, const QUrl &) {
+                         if (!obj) {
+                             fprintf(stderr, "[GUI] FATAL: QML object creation failed\n");
+                             QCoreApplication::exit(1);
+                         }
                      }, Qt::QueuedConnection);
 
     engine.load(QUrl("qrc:/main.qml"));
