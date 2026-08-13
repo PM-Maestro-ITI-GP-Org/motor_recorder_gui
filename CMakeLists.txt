@@ -56,6 +56,7 @@ qt6_add_resources(motor_gui "resources"
         Theme.qml
         AppCard.qml
         FilledButton.qml
+        MaterialField.qml
         StatusPill.qml
 )
 

@@ -27,6 +27,7 @@ ApplicationWindow {
     Material.accent: Theme.accent
     Material.primary: Theme.accent
 
+
     MqttClient {
         id: mqtt
         onLogMessage: (text, type) => logAppend(text, type)
@@ -1764,34 +1765,22 @@ ApplicationWindow {
             padding: 16
         }
 
+        /* Text for the dismissive action, filled for the confirming one --
+           the Material pairing. The old Cancel went solid accent on hover,
+           which made the two buttons compete for the same emphasis. */
         footer: DialogButtonBox {
-            spacing: 8
-            padding: 12
+            spacing: Theme.spacingTight
+            padding: Theme.spacing
             background: Rectangle { color: "transparent" }
-            Button {
+            FilledButton {
                 text: "Cancel"
-                implicitWidth: 80
+                variant: "text"
                 onClicked: startDialog.close()
-                contentItem: Text {
-                    text: parent.text; color: Theme.textPrimary; font.bold: true; font.pixelSize: Theme.fontBody
-                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    color: parent.hovered ? Theme.accent : Theme.surfaceAlt; radius: 6
-                    border.color: Theme.border; border.width: 1
-                }
             }
-            Button {
-                text: "OK"
-                implicitWidth: 80
+            FilledButton {
+                text: "Start recording"
+                variant: "filled"
                 onClicked: startDialog.accept()
-                contentItem: Text {
-                    text: parent.text; color: "#ffffff"; font.bold: true; font.pixelSize: Theme.fontBody
-                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    color: parent.down ? Theme.accent : parent.hovered ? Theme.success : Theme.success; radius: 6
-                }
             }
         }
 
@@ -1824,28 +1813,26 @@ ApplicationWindow {
             anchors.margins: 16
             spacing: 12
 
-            Text { text: "Recording Name (optional):"; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
-            TextField {
+            /* The caption is the field's own floating label now. It used to be
+               a separate Text above each field AS WELL AS a placeholderText,
+               which the Material style also renders as a floating label -- so
+               every field was captioned twice, and the floating copy rose onto
+               the custom background's border and sat across it. */
+            MaterialField {
                 id: startNameField
                 Layout.fillWidth: true
+                label: "Recording name (optional)"
+                hint: "e.g. motor_test_1"
                 text: "motor_test_1"
-                placeholderText: "e.g. motor_test_1"
-                color: Theme.textPrimary
-                background: Rectangle { color: Theme.background; radius: 4; border.color: Theme.border; border.width: 1 }
-                leftPadding: 8
-                font.pixelSize: Theme.fontBody
             }
 
-            Text { text: "Duration (seconds, 0 = manual stop):"; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
-            TextField {
+            MaterialField {
                 id: startDurationField
                 Layout.fillWidth: true
+                label: "Duration (seconds)"
+                hint: "0 = stop manually"
                 text: "0"
-                placeholderText: "0 = manual stop"
-                color: Theme.textPrimary
-                background: Rectangle { color: Theme.background; radius: 4; border.color: Theme.border; border.width: 1 }
-                leftPadding: 8
-                font.pixelSize: Theme.fontBody
+                inputMethodHints: Qt.ImhDigitsOnly
                 validator: IntValidator { bottom: 0; top: 86400 }
             }
         }
