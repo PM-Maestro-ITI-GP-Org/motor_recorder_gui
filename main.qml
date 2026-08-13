@@ -27,7 +27,6 @@ ApplicationWindow {
     Material.accent: Theme.accent
     Material.primary: Theme.accent
 
-
     MqttClient {
         id: mqtt
         onLogMessage: (text, type) => logAppend(text, type)
@@ -235,49 +234,34 @@ ApplicationWindow {
 
     function loadLocalCSV(filePath) {
         if (!filePath) return
-        console.log("Loading local CSV:", filePath)
         var text = mqtt.readTextFile(filePath)
         if (text === "") {
             logAppend("Failed to read file: " + filePath, "error")
             return
         }
-        csvData = []
-        var lines = text.split('\n')
-        if (lines.length < 2) {
+
+        /*
+         * Delegates instead of parsing again.
+         *
+         * This function used to be a copy of parseDownloadedCSV -- same header
+         * handling, same decimation, same trim-every-line-then-discard-it loop
+         * -- so a local file got neither the faster parse nor the GPU load, and
+         * every fix had to be made twice or (as happened) only once. One parser
+         * now, whichever route the file arrived by.
+         */
+        parseDownloadedCSV(text)
+        if (csvTotalRows === 0) {
             logAppend("No valid data rows in: " + filePath, "warning")
             return
         }
-        var headerCols = lines[0].split(',')
-        csvHeader = headerCols.slice()
-        var friendly = []
-        for (var k = 0; k < headerCols.length; ++k)
-            friendly.push(friendlyColumnName(headerCols[k]))
-        csvColumns = friendly
-        initColumnStates()
-        var nCols = csvColumns.length
-        var dataCount = 0
-        var step = Math.max(1, Math.floor((lines.length - 1) / maxPlotRows))
-        for (var i = 1; i < lines.length; ++i) {
-            var line = lines[i].trim()
-            if (line === "") continue
-            dataCount++
-            if ((dataCount - 1) % step !== 0) continue
-            var cols = line.split(',')
-            if (cols.length >= nCols)
-                csvData.push(cols)
-        }
-        if (dataCount === 0) {
-            logAppend("No valid data rows in: " + filePath, "warning")
-            return
-        }
-        csvTotalRows = dataCount
-        csvStep = step
+
         graphStartRow = 0
         graphEndRow = csvTotalRows
         graphStartField.text = "0"
-        graphEndField.text = csvTotalRows > 0 ? (csvTotalRows - 1).toString() : "0"
-        logAppend("Loaded " + dataCount + " rows from " + filePath +
-                  (step > 1 ? " (downsampled to " + csvData.length + ")" : ""), "success")
+        graphEndField.text = (csvTotalRows - 1).toString()
+        chartCanvas.yLo = NaN
+        chartCanvas.yHi = NaN
+        logAppend("Loaded " + csvTotalRows + " rows from " + filePath, "success")
         chartCanvas.requestPaint()
     }
 
@@ -693,6 +677,13 @@ ApplicationWindow {
     }
 
     function parseDownloadedCSV(raw) {
+        /* The renderer parses the whole file itself, into float columns, once.
+           That is what the plot draws from -- so the plot is never limited to
+           the decimated `maxPlotRows` sample the JS pass below produces, and
+           zooming in reveals real detail instead of interpolating between
+           kept rows. */
+        traceView.loadCsvText(raw)
+
         /*
          * The order of operations here is the whole cost.
          *
@@ -749,7 +740,8 @@ ApplicationWindow {
             if (cols.length >= nCols) { rows.push(cols); kept++ }
         }
 
-        csvTotalRows = total
+        /* Prefer the renderer's count: it kept every row. */
+        csvTotalRows = traceView.rowCount > 0 ? traceView.rowCount : total
         csvStep = step
         csvData = rows
     }
@@ -1393,6 +1385,35 @@ ApplicationWindow {
                     border.width: 1
                     clip: true
 
+                    /*
+                     * The plot itself. Sits exactly on the Canvas's plot area
+                     * (its margins), so the Canvas keeps the axes and labels
+                     * around it and nothing overdraws them.
+                     */
+                    TraceView {
+                        id: traceView
+                        anchors.fill: parent
+                        anchors.leftMargin: 60
+                        anchors.rightMargin: 10
+                        anchors.topMargin: 10
+                        anchors.bottomMargin: 40
+                        z: 1
+
+                        seriesVisible: checkedColumns
+                        seriesColors: traceColors
+
+                        xMin: graphStartRow
+                        xMax: graphEndRow > graphStartRow ? graphEndRow
+                                                          : Math.max(1, csvTotalRows)
+                        yMin: chartCanvas.yLo
+                        yMax: chartCanvas.yHi
+
+                        /* Labels are drawn by the Canvas, so it has to repaint
+                           whenever the plot's own view changes. */
+                        onWindowChanged: chartCanvas.requestPaint()
+                        onDataChanged: chartCanvas.requestPaint()
+                    }
+
                     Canvas {
                         id: chartCanvas
                         anchors.fill: parent
@@ -1500,11 +1521,11 @@ ApplicationWindow {
                                back out to the autoscale the moment it repainted.
                                NaN means "autoscale", which is what Reset
                                restores. */
-                            if (!isNaN(chartCanvas.yLo) && !isNaN(chartCanvas.yHi)
-                                && chartCanvas.yHi > chartCanvas.yLo) {
-                                yMin = chartCanvas.yLo
-                                yMax = chartCanvas.yHi
-                            }
+                            /* Ask the renderer, so the labels cannot disagree
+                               with the curve: it applies the same autoscale
+                               (or the same manual window) that it draws with. */
+                            var vb = traceView.visibleYBounds()
+                            if (vb && vb.length === 2) { yMin = vb[0]; yMax = vb[1] }
                             /* Published so the mouse handlers can convert a
                                pixel back into a row and a value. */
                             chartCanvas.plotL = mL; chartCanvas.plotT = mT
@@ -1540,23 +1561,11 @@ ApplicationWindow {
                             ctx.fillStyle = Theme.textSecondary; ctx.font = "9px monospace"
                             ctx.fillText("Row #", mL + pW / 2 - 15, height - 22)
 
-                            for (var ci = 1; ci < Math.min(nCols, data[sIdx].length); ci++) {
-                                if (!checked[ci]) continue
-                                ctx.strokeStyle = traceColors[ci % traceColors.length]
-                                ctx.lineWidth = 1.2
-                                ctx.beginPath()
-                                var started = false
-                                for (var sj = sIdx; sj < eIdx; sj += plotStep) {
-                                    var origRow = sj * csvStep
-                                    var xPos = mL + pW * ((origRow - startRow) / visibleRange)
-                                    var val = Number(data[sj][ci])
-                                    if (isNaN(val)) continue
-                                    var yPos = mT + pH * (1 - (val - yMin) / (yMax - yMin))
-                                    if (!started) { ctx.moveTo(xPos, yPos); started = true }
-                                    else ctx.lineTo(xPos, yPos)
-                                }
-                                ctx.stroke()
-                            }
+                            /* The traces themselves are drawn by the
+                               TraceView below -- on the GPU, from float
+                               columns. This Canvas now only paints the grid
+                               and the axis labels. */
+
                         }
                     }
 
@@ -1583,6 +1592,7 @@ ApplicationWindow {
                     MouseArea {
                         id: chartMouse
                         anchors.fill: parent
+                        z: 3
                         acceptedButtons: Qt.LeftButton | Qt.RightButton
                         hoverEnabled: true
                         cursorShape: pressedButtons & Qt.RightButton

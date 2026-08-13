@@ -4,6 +4,7 @@
 #include <QQuickStyle>
 #include <QtQml>
 #include "mqttclient.h"
+#include "traceview.h"
 
 int main(int argc, char *argv[])
 {
@@ -14,6 +15,9 @@ int main(int argc, char *argv[])
     QQuickStyle::setStyle("Material");
 
     qmlRegisterType<MqttClient>("MqttClient", 1, 0, "MqttClient");
+    /* GPU-rendered trace plot; see traceview.h for why the Canvas
+       it replaces could not keep up. */
+    qmlRegisterType<TraceView>("MqttClient", 1, 0, "TraceView");
 
     /* Theme is a singleton so every file refers to the same palette instead of
        repeating literals. Registered here rather than with a qmldir, which

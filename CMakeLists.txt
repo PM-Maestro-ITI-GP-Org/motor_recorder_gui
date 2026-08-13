@@ -34,6 +34,8 @@ add_executable(motor_gui
     main.cpp
     mqttclient.h
     mqttclient.cpp
+    traceview.h
+    traceview.cpp
 )
 
 target_link_libraries(motor_gui PRIVATE
