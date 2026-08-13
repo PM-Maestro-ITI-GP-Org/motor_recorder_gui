@@ -6,6 +6,7 @@
 #include <QStringList>
 #include <QColor>
 #include <QVariantList>
+#include <QtGlobal>
 
 /*
  * GPU-rendered multi-series line plot.
@@ -44,6 +45,10 @@ class TraceView : public QQuickItem
     Q_PROPERTY(QVariantList seriesColors READ seriesColors
                WRITE setSeriesColors NOTIFY seriesChanged)
 
+    /* True while a file is being read and parsed on the worker thread. */
+    Q_PROPERTY(bool loading READ loading NOTIFY loadingChanged)
+    Q_PROPERTY(qreal loadProgress READ loadProgress NOTIFY loadProgressChanged)
+
     Q_PROPERTY(int rowCount READ rowCount NOTIFY dataChanged)
     Q_PROPERTY(QStringList headers READ headers NOTIFY dataChanged)
 
@@ -53,7 +58,21 @@ public:
     /* Parse CSV text into float columns. Returns row count, 0 on failure.
        Everything downstream works on floats; no string survives this call. */
     Q_INVOKABLE int loadCsvText(const QString &text);
+
+    /*
+     * Read and parse a file off the GUI thread.
+     *
+     * The synchronous version above blocks for as long as the parse takes,
+     * which on a 196MB recording is long enough for the window manager to
+     * offer to kill the app. This returns immediately; watch `loading` and
+     * `loadProgress`, and loadFinished() when it lands.
+     */
+    Q_INVOKABLE void loadCsvFileAsync(const QString &path);
+
     Q_INVOKABLE void clearData();
+
+    bool  loading() const { return m_loading; }
+    qreal loadProgress() const { return m_progress; }
 
     /* Autoscaled [min, max] over the current x window, for the axis labels
        that are still drawn in QML. Empty if there is nothing visible. */
@@ -89,6 +108,10 @@ public:
     QStringList headers() const { return m_headers; }
 
 signals:
+    void loadingChanged();
+    void loadProgressChanged();
+    /* rows > 0 on success, 0 if the file could not be read or held no data. */
+    void loadFinished(int rows);
     void windowChanged();
     void seriesChanged();
     void dataChanged();
@@ -108,6 +131,13 @@ private:
     QVariantList m_visible;
     QVariantList m_colors;
 
+    bool  m_loading = false;
+    qreal m_progress = 0;
+    /* Bumped for each new request so a slow load that is superseded discards
+       its result instead of overwriting the newer one. */
+    quint64 m_loadSeq = 0;
+
+    void installColumns(QVector<QVector<float>> cols, QStringList headers);
     void resolveY(float &lo, float &hi) const;
 };
 

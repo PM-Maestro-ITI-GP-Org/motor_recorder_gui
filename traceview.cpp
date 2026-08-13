@@ -5,10 +5,92 @@
 #include <QSGFlatColorMaterial>
 #include <QStringView>
 #include <cmath>
+#include <QFile>
+#include <QByteArray>
+#include <thread>
+#include <functional>
 
 TraceView::TraceView(QQuickItem *parent) : QQuickItem(parent)
 {
     setFlag(ItemHasContents, true);
+}
+
+
+/*
+ * Parse CSV bytes into float columns.
+ *
+ * Works on raw bytes rather than a QString: a 196MB file becomes ~392MB as
+ * UTF-16, and every field would be converted twice. CSV here is ASCII digits
+ * and commas, so bytes are the natural unit and strtof is handed the buffer
+ * directly.
+ *
+ * `report` is called with 0..1 occasionally; it must be safe to call from a
+ * worker thread. `cancelled` lets a superseded load stop early instead of
+ * finishing work whose result will be thrown away.
+ */
+static bool parseCsvBytes(const QByteArray &buf,
+                          QVector<QVector<float>> &cols,
+                          QStringList &headers,
+                          const std::function<void(qreal)> &report,
+                          const std::function<bool()> &cancelled)
+{
+    const char *p = buf.constData();
+    const qsizetype n = buf.size();
+    if (n <= 0) return false;
+
+    qsizetype i = 0, ls = 0;
+    while (i < n && p[i] != '\n') ++i;
+    qsizetype le = i;
+    if (le > ls && p[le - 1] == '\r') --le;
+
+    for (qsizetype fs = ls, k = ls; k <= le; ++k) {
+        if (k == le || p[k] == ',') {
+            headers << QString::fromLatin1(p + fs, int(k - fs)).trimmed();
+            fs = k + 1;
+        }
+    }
+    const int nCols = headers.size();
+    if (nCols == 0) return false;
+
+    cols.resize(nCols);
+    const int guess = int(qMax<qsizetype>(1024, n / qMax(1, nCols * 8)));
+    for (int c = 0; c < nCols; ++c)
+        cols[c].reserve(guess);
+
+    ++i;
+    qsizetype lastReport = 0;
+
+    while (i < n) {
+        if (cancelled && cancelled()) return false;
+
+        ls = i;
+        while (i < n && p[i] != '\n') ++i;
+        le = i;
+        if (le > ls && p[le - 1] == '\r') --le;
+        ++i;
+        if (le <= ls) continue;
+
+        int col = 0;
+        qsizetype fs = ls;
+        for (qsizetype k = ls; k <= le && col < nCols; ++k) {
+            if (k == le || p[k] == ',') {
+                cols[col].append(strtof(p + fs, nullptr));
+                ++col;
+                fs = k + 1;
+            }
+        }
+        for (; col < nCols; ++col)
+            cols[col].append(0.0f);
+
+        /* Every ~4MB: often enough for a bar to move, rare enough not to be
+           the cost itself. */
+        if (report && i - lastReport > (4 << 20)) {
+            lastReport = i;
+            report(qreal(i) / qreal(n));
+        }
+    }
+    if (report) report(1.0);
+    return true;
 }
 
 /*
@@ -93,6 +175,71 @@ int TraceView::loadCsvText(const QString &text)
     emit windowChanged();
     update();
     return m_rows;
+}
+
+
+void TraceView::installColumns(QVector<QVector<float>> cols, QStringList headers)
+{
+    m_cols = std::move(cols);
+    m_headers = std::move(headers);
+    m_rows = m_cols.isEmpty() ? 0 : m_cols[0].size();
+    m_xMin = 0;
+    m_xMax = m_rows > 0 ? m_rows : 1;
+    m_yMin = m_yMax = qQNaN();
+    emit dataChanged();
+    emit windowChanged();
+    update();
+}
+
+void TraceView::loadCsvFileAsync(const QString &path)
+{
+    const quint64 seq = ++m_loadSeq;
+
+    m_progress = 0;
+    m_loading = true;
+    emit loadProgressChanged();
+    emit loadingChanged();
+
+    /*
+     * Detached, with the sequence number as the guard.
+     *
+     * Everything the thread touches is either its own local or marshalled back
+     * with a queued call, so the render thread never sees a half-built column.
+     * A load that is superseded (the user picks another file mid-parse) sees a
+     * bumped m_loadSeq and drops its result rather than racing the newer one.
+     */
+    std::thread([this, path, seq]() {
+        QVector<QVector<float>> cols;
+        QStringList headers;
+        bool ok = false;
+
+        QFile f(path);
+        if (f.open(QIODevice::ReadOnly)) {
+            const QByteArray buf = f.readAll();
+            f.close();
+            ok = parseCsvBytes(
+                buf, cols, headers,
+                [this, seq](qreal frac) {
+                    QMetaObject::invokeMethod(this, [this, seq, frac]() {
+                        if (seq != m_loadSeq) return;
+                        m_progress = frac;
+                        emit loadProgressChanged();
+                    }, Qt::QueuedConnection);
+                },
+                [this, seq]() { return seq != m_loadSeq; });
+        }
+
+        QMetaObject::invokeMethod(this,
+            [this, seq, ok, c = std::move(cols), h = std::move(headers)]() mutable {
+                if (seq != m_loadSeq) return;      /* superseded */
+                if (ok) installColumns(std::move(c), std::move(h));
+                m_loading = false;
+                m_progress = 1.0;
+                emit loadingChanged();
+                emit loadProgressChanged();
+                emit loadFinished(ok ? m_rows : 0);
+            }, Qt::QueuedConnection);
+    }).detach();
 }
 
 void TraceView::clearData()

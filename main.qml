@@ -234,35 +234,17 @@ ApplicationWindow {
 
     function loadLocalCSV(filePath) {
         if (!filePath) return
-        var text = mqtt.readTextFile(filePath)
-        if (text === "") {
-            logAppend("Failed to read file: " + filePath, "error")
-            return
-        }
-
         /*
-         * Delegates instead of parsing again.
+         * The path goes to the renderer, which reads and parses it on a worker
+         * thread. Everything this function used to do -- readTextFile() then a
+         * full parse -- ran on the GUI thread, so a large recording froze the
+         * window long enough for the desktop to offer to kill the app.
          *
-         * This function used to be a copy of parseDownloadedCSV -- same header
-         * handling, same decimation, same trim-every-line-then-discard-it loop
-         * -- so a local file got neither the faster parse nor the GPU load, and
-         * every fix had to be made twice or (as happened) only once. One parser
-         * now, whichever route the file arrived by.
+         * The rest of the state is set in onLoadFinished, once there is
+         * something to set it from.
          */
-        parseDownloadedCSV(text)
-        if (csvTotalRows === 0) {
-            logAppend("No valid data rows in: " + filePath, "warning")
-            return
-        }
-
-        graphStartRow = 0
-        graphEndRow = csvTotalRows
-        graphStartField.text = "0"
-        graphEndField.text = (csvTotalRows - 1).toString()
-        chartCanvas.yLo = NaN
-        chartCanvas.yHi = NaN
-        logAppend("Loaded " + csvTotalRows + " rows from " + filePath, "success")
-        chartCanvas.requestPaint()
+        graphPendingName = filePath
+        traceView.loadCsvFileAsync(filePath)
     }
 
     function processDownloadQueue() {
@@ -645,6 +627,8 @@ ApplicationWindow {
     /* 0-100, drives both progress bars by binding. */
     property int uploadPct: 0
     property int downloadPct: 0
+
+    property string graphPendingName: ""
 
     property bool showGraph: false
 
@@ -1417,6 +1401,34 @@ ApplicationWindow {
                            whenever the plot's own view changes. */
                         onWindowChanged: chartCanvas.requestPaint()
                         onDataChanged: chartCanvas.requestPaint()
+
+                        onLoadFinished: (rows) => {
+                            if (rows <= 0) {
+                                logAppend("No data rows in " + graphPendingName, "warning")
+                                csvTotalRows = 0
+                                chartCanvas.requestPaint()
+                                return
+                            }
+                            /* Column names come from the renderer now -- it is
+                               the only thing that parsed the file. */
+                            csvHeader = traceView.headers
+                            var friendly = []
+                            for (var k = 0; k < csvHeader.length; ++k)
+                                friendly.push(friendlyColumnName(csvHeader[k]))
+                            csvColumns = friendly
+                            initColumnStates()
+
+                            csvTotalRows = rows
+                            csvStep = 1
+                            graphStartRow = 0
+                            graphEndRow = rows
+                            graphStartField.text = "0"
+                            graphEndField.text = (rows - 1).toString()
+                            chartCanvas.yLo = NaN
+                            chartCanvas.yHi = NaN
+                            logAppend("Loaded " + rows + " rows from " + graphPendingName, "success")
+                            chartCanvas.requestPaint()
+                        }
                     }
 
                     Canvas {
@@ -1599,6 +1611,44 @@ ApplicationWindow {
                         border.color: Theme.accent
                         border.width: 1
                         z: 5
+                    }
+
+                    /* Covers the plot while a file is being read, and eats
+                       clicks so the zoom handlers cannot act on data that is
+                       still arriving. */
+                    Rectangle {
+                        anchors.fill: parent
+                        visible: traceView.loading
+                        color: Theme.surface
+                        opacity: 0.92
+                        z: 6
+
+                        MouseArea { anchors.fill: parent }
+
+                        ColumnLayout {
+                            anchors.centerIn: parent
+                            spacing: Theme.spacing
+                            width: 320
+
+                            Text {
+                                text: "Loading recording…"
+                                color: Theme.textPrimary
+                                font.pixelSize: Theme.fontTitle
+                                font.weight: Font.DemiBold
+                                Layout.alignment: Qt.AlignHCenter
+                            }
+                            ProgressBar {
+                                Layout.fillWidth: true
+                                from: 0; to: 1
+                                value: traceView.loadProgress
+                            }
+                            Text {
+                                text: Math.round(traceView.loadProgress * 100) + "%"
+                                color: Theme.textSecondary
+                                font.pixelSize: Theme.fontSmall
+                                Layout.alignment: Qt.AlignHCenter
+                            }
+                        }
                     }
 
                     MouseArea {
