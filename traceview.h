@@ -45,6 +45,10 @@ class TraceView : public QQuickItem
     Q_PROPERTY(QVariantList seriesColors READ seriesColors
                WRITE setSeriesColors NOTIFY seriesChanged)
 
+    /* Trace thickness in pixels. Honoured for real -- see the note on the
+       triangle-strip expansion in updatePaintNode. */
+    Q_PROPERTY(qreal lineWidth READ lineWidth WRITE setLineWidth NOTIFY lineWidthChanged)
+
     /* True while a file is being read and parsed on the worker thread. */
     Q_PROPERTY(bool loading READ loading NOTIFY loadingChanged)
     Q_PROPERTY(qreal loadProgress READ loadProgress NOTIFY loadProgressChanged)
@@ -115,6 +119,9 @@ public:
     void setSeriesVisible(const QVariantList &v);
     void setSeriesColors(const QVariantList &v);
 
+    qreal lineWidth() const { return m_lineWidth; }
+    void setLineWidth(qreal w);
+
     int rowCount() const { return m_rows; }
     QStringList headers() const { return m_headers; }
 
@@ -126,6 +133,7 @@ signals:
     void windowChanged();
     void seriesChanged();
     void dataChanged();
+    void lineWidthChanged();
 
 protected:
     QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *) override;
@@ -148,9 +156,23 @@ private:
        its result instead of overwriting the newer one. */
     quint64 m_loadSeq = 0;
 
+    qreal m_lineWidth = 1.6;
+
     int  m_liveCap = 0;      /* >0 while in live mode */
+
+    /* The vertical scale actually being drawn in live mode, which lags the
+       autoscale target on the way in. See updateLiveYRange(). */
+    float m_liveYLo = 0.f, m_liveYHi = 1.f;
+    bool  m_liveYValid = false;
+
+    /* Scratch for the polyline before it is widened into triangles. A member
+       rather than a local so a 60Hz redraw is not also 60 allocations a second;
+       only ever touched on the render thread. */
+    QVector<QPointF> m_pts;
+
     void installColumns(QVector<QVector<float>> cols, QStringList headers);
     void resolveY(float &lo, float &hi) const;
+    void updateLiveYRange();
 };
 
 #endif

@@ -186,6 +186,8 @@ void TraceView::installColumns(QVector<QVector<float>> cols, QStringList headers
     m_xMin = 0;
     m_xMax = m_rows > 0 ? m_rows : 1;
     m_yMin = m_yMax = qQNaN();
+    m_liveCap = 0;              /* a loaded file replaces live mode outright */
+    m_liveYValid = false;
     emit dataChanged();
     emit windowChanged();
     update();
@@ -254,9 +256,72 @@ void TraceView::beginLive(const QStringList &columnNames, int capacity)
     m_rows = 0;
     m_xMin = 0; m_xMax = 1;
     m_yMin = m_yMax = qQNaN();
+    m_liveYValid = false;
     emit dataChanged();
     emit windowChanged();
     update();
+}
+
+/*
+ * Hold the vertical scale still between samples.
+ *
+ * resolveY() autoscales to whatever is inside the x window, and in live mode
+ * that window changes on every single sample -- so one new extreme rescaled the
+ * plot and every trace on it jumped, and then jumped back when the sample that
+ * caused it fell off the end. Nothing was wrong with the shape being drawn;
+ * there was just never a moment where it held still long enough to read.
+ *
+ * So: grow at once, shrink slowly. A spike is on screen the frame it arrives
+ * and is never clipped, and the scale eases back over roughly a second once it
+ * has passed out of the window instead of snapping.
+ */
+void TraceView::updateLiveYRange()
+{
+    if (m_liveCap <= 0 || m_cols.isEmpty() || m_rows < 1)
+        return;
+
+    float lo =  std::numeric_limits<float>::infinity();
+    float hi = -std::numeric_limits<float>::infinity();
+
+    for (int c = 1; c < m_cols.size(); ++c) {
+        if (c >= m_visible.size() || !m_visible[c].toBool()) continue;
+        const QVector<float> &col = m_cols[c];
+        for (int r = 0; r < m_rows && r < col.size(); ++r) {
+            const float v = col[r];
+            if (v < lo) lo = v;
+            if (v > hi) hi = v;
+        }
+    }
+
+    /* Nothing visible: leave the scale where it was rather than snapping to a
+       default the moment the last channel is switched off. */
+    if (!std::isfinite(lo) || !std::isfinite(hi))
+        return;
+
+    float pad = (hi - lo) * 0.1f;
+    if (pad <= 0.f) pad = 1.f;
+    lo -= pad; hi += pad;
+
+    if (!m_liveYValid) {
+        m_liveYLo = lo;
+        m_liveYHi = hi;
+        m_liveYValid = true;
+    } else {
+        /* Outward is immediate; the lerp below is then a no-op on that side. */
+        if (lo < m_liveYLo) m_liveYLo = lo;
+        if (hi > m_liveYHi) m_liveYHi = hi;
+
+        /* Inward closes 3% of the remaining gap per sample, which at the
+           recorder's live rate is a time constant near a second -- slow enough
+           to read, fast enough not to leave the plot zoomed out after a
+           transient. */
+        const float k = 0.03f;
+        m_liveYLo += (lo - m_liveYLo) * k;
+        m_liveYHi += (hi - m_liveYHi) * k;
+    }
+
+    m_yMin = m_liveYLo;
+    m_yMax = m_liveYHi;
 }
 
 void TraceView::appendLiveRow(const QVariantList &values)
@@ -281,6 +346,7 @@ void TraceView::appendLiveRow(const QVariantList &values)
     m_rows = m_cols[0].size();
     m_xMin = 0;
     m_xMax = qMax(2, m_rows);
+    updateLiveYRange();
     emit windowChanged();
     update();
 }
@@ -288,6 +354,7 @@ void TraceView::appendLiveRow(const QVariantList &values)
 void TraceView::clearData()
 {
     m_liveCap = 0;
+    m_liveYValid = false;
     m_cols.clear();
     m_headers.clear();
     m_rows = 0;
@@ -387,6 +454,14 @@ void TraceView::setSeriesColors(const QVariantList &v)
 {
     m_colors = v; emit seriesChanged(); update();
 }
+void TraceView::setLineWidth(qreal w)
+{
+    w = qBound(0.5, w, 12.0);
+    if (m_lineWidth == w) return;
+    m_lineWidth = w;
+    emit lineWidthChanged();
+    update();
+}
 
 /*
  * Build one line strip per visible series.
@@ -398,6 +473,17 @@ void TraceView::setSeriesColors(const QVariantList &v)
  * Nodes are reused across frames where possible: allocating a QSGGeometryNode
  * per series per frame would hand the scene graph a completely new subtree
  * every time the mouse moves.
+ *
+ * Each series is a triangle strip, not a line strip.
+ *
+ * QSGGeometry::setLineWidth() was being called with 1.6, and on Qt 6 that is a
+ * request the renderer is free to ignore -- and does, on every RHI backend
+ * except OpenGL, where core profile has dropped wide lines too. So the trace
+ * drew as a hairline: one hard-edged pixel, aliased, and thin enough that two
+ * traces crossing were hard to tell apart. Widening the polyline into triangles
+ * here means the width is geometry rather than a hint, so it is honoured
+ * everywhere and it scales with the item, and the strip's edges are then
+ * antialiased by the multisampled layer the QML side puts this in.
  */
 QSGNode *TraceView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
 {
@@ -445,9 +531,9 @@ QSGNode *TraceView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
             node = static_cast<QSGGeometryNode *>(root->childAtIndex(childIdx));
         } else {
             node = new QSGGeometryNode;
-            auto *g = new QSGGeometry(QSGGeometry::defaultAttributes_Point2D(), points);
-            g->setDrawingMode(QSGGeometry::DrawLineStrip);
-            g->setLineWidth(1.6f);
+            auto *g = new QSGGeometry(QSGGeometry::defaultAttributes_Point2D(),
+                                      points * 2);
+            g->setDrawingMode(QSGGeometry::DrawTriangleStrip);
             node->setGeometry(g);
             node->setFlag(QSGNode::OwnsGeometry, true);
             auto *m = new QSGFlatColorMaterial;
@@ -457,8 +543,8 @@ QSGNode *TraceView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
         }
 
         QSGGeometry *g = node->geometry();
-        if (g->vertexCount() != points)
-            g->allocate(points);
+        if (g->vertexCount() != points * 2)
+            g->allocate(points * 2);
 
         QSGGeometry::Point2D *v = g->vertexDataAsPoint2D();
         const QVector<float> &col = m_cols[c];
@@ -479,12 +565,43 @@ QSGNode *TraceView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
         const double t1 = tsCol ? double((*tsCol)[r1 - 1]) : double(r1 - 1);
         const double tSpan = (t1 > t0) ? (t1 - t0) : double(qMax(1, span));
 
+        m_pts.resize(points);
         for (int i = 0; i < points; ++i) {
             const int r = qMin(r1 - 1, r0 + i * step);
             const double tv = tsCol ? double((*tsCol)[r]) : double(r);
             const float x = float((tv - t0) / tSpan) * float(w);
             const float y = float(h) * (1.f - (col[r] - lo) / yRange);
-            v[i].set(x, y);
+            m_pts[i] = QPointF(x, y);
+        }
+
+        /*
+         * Widen the polyline: two vertices per point, offset along the normal
+         * of the local tangent, consumed as one triangle strip.
+         *
+         * The tangent is taken across the neighbours rather than from the next
+         * segment alone, so the offset turns gradually through a corner instead
+         * of stepping at it. That is a plain averaged normal and not a proper
+         * miter -- a hairpin at more than the half-width would pinch -- which at
+         * these widths is a fraction of a pixel and costs nothing to compute.
+         */
+        const float hw = float(m_lineWidth) * 0.5f;
+        for (int i = 0; i < points; ++i) {
+            const QPointF &p  = m_pts[i];
+            const QPointF &pa = m_pts[qMax(0, i - 1)];
+            const QPointF &pb = m_pts[qMin(points - 1, i + 1)];
+
+            double tx = pb.x() - pa.x();
+            double ty = pb.y() - pa.y();
+            double len = std::sqrt(tx * tx + ty * ty);
+            if (len < 1e-9) { tx = 1.0; ty = 0.0; len = 1.0; }
+            tx /= len; ty /= len;
+
+            /* Normal, i.e. the tangent rotated a quarter turn. */
+            const float nx = float(-ty) * hw;
+            const float ny = float( tx) * hw;
+
+            v[2 * i    ].set(float(p.x()) + nx, float(p.y()) + ny);
+            v[2 * i + 1].set(float(p.x()) - nx, float(p.y()) - ny);
         }
 
         g->markVertexDataDirty();
