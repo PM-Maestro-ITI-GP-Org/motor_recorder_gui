@@ -71,6 +71,17 @@ public:
 
     Q_INVOKABLE void clearData();
 
+    /*
+     * Live mode: a rolling window of the most recent samples.
+     *
+     * Same renderer and the same GPU path as a loaded file -- only the source
+     * differs. beginLive() once with the column names, then appendLiveRow()
+     * per sample; the oldest is dropped when the window is full and the x
+     * range follows the data, so nothing outside has to track it.
+     */
+    Q_INVOKABLE void beginLive(const QStringList &columnNames, int capacity);
+    Q_INVOKABLE void appendLiveRow(const QVariantList &values);
+
     bool  loading() const { return m_loading; }
     qreal loadProgress() const { return m_progress; }
 
@@ -137,6 +148,7 @@ private:
        its result instead of overwriting the newer one. */
     quint64 m_loadSeq = 0;
 
+    int  m_liveCap = 0;      /* >0 while in live mode */
     void installColumns(QVector<QVector<float>> cols, QStringList headers);
     void resolveY(float &lo, float &hi) const;
 };

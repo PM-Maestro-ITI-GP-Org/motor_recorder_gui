@@ -105,6 +105,10 @@ ApplicationWindow {
             if (parts.length === 13) {
                 for (var c = 0; c < 13; ++c)
                     dataModel.setProperty(c, "value", parts[c])
+                /* Same row into the rolling plot. It keeps floats, so the
+                   strings stop here. */
+                liveTrace.appendLiveRow(parts)
+                window.liveSamples++
             }
         }
         onFileDownloaded: (csvData) => {
@@ -628,6 +632,21 @@ ApplicationWindow {
     property int uploadPct: 0
     property int downloadPct: 0
 
+    /* Channels offered on the live plot, as column indices into a data row.
+       Not all thirteen: eight currents at once is a thicket. */
+    readonly property var liveChannels: [1, 2, 9, 10, 11, 12]
+    property var liveOn: [true, true, false, false, false, true]
+    property int liveSamples: 0
+
+    /* liveChannels/liveOn -> the per-column bool list TraceView wants. */
+    function liveSeriesVisible() {
+        var v = []
+        for (var i = 0; i < channelLabels.length; ++i) v.push(false)
+        for (var k = 0; k < liveChannels.length; ++k)
+            if (liveOn[k]) v[liveChannels[k]] = true
+        return v
+    }
+
     property string graphPendingName: ""
 
     property bool showGraph: false
@@ -959,6 +978,143 @@ ApplicationWindow {
                         graphFileCombo.currentIndex = 0
                     } else {
                         loadSelectedFile(graphFileCombo.currentIndex)
+                    }
+                }
+            }
+        }
+
+        /*
+         * Live plot.
+         *
+         * The rolling window is the same TraceView that draws recordings, in
+         * live mode -- so this is the GPU path too, not a Canvas repainting a
+         * few hundred points ten times a second.
+         *
+         * Which channels it draws is chosen here rather than inherited from
+         * the Graphs page: they are different questions. This one is "what is
+         * the motor doing right now", and eight current channels at once is a
+         * thicket rather than an answer.
+         */
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 260
+            color: Theme.surface
+            radius: Theme.radius
+            border.color: Theme.border
+            border.width: 1
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: Theme.spacing
+                spacing: Theme.spacingTight
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing
+
+                    Text {
+                        text: "Live plot"
+                        color: Theme.textPrimary
+                        font.pixelSize: Theme.fontTitle
+                        font.weight: Font.DemiBold
+                    }
+
+                    /* One chip per channel: the colour is the trace, and the
+                       chip is the switch. */
+                    Repeater {
+                        model: window.liveChannels
+                        delegate: Rectangle {
+                            required property int index
+                            required property var modelData
+                            implicitHeight: 28
+                            implicitWidth: chipRow.implicitWidth + 20
+                            radius: height / 2
+                            /* traceColors holds strings, so no .r/.g/.b here:
+                               the channel colour carries on the dot and the
+                               outline, and the fill stays neutral. */
+                            color: window.liveOn[index] ? Theme.accentSoft
+                                                        : Theme.surfaceAlt
+                            border.width: 1
+                            border.color: window.liveOn[index]
+                                          ? window.traceColors[modelData] : Theme.border
+
+                            Row {
+                                id: chipRow
+                                anchors.centerIn: parent
+                                spacing: 6
+                                Rectangle {
+                                    width: 9; height: 9; radius: 4.5
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    color: window.traceColors[modelData]
+                                    opacity: window.liveOn[index] ? 1 : 0.35
+                                }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: window.channelLabels[modelData]
+                                    font.pixelSize: Theme.fontTiny
+                                    font.weight: Font.DemiBold
+                                    color: window.liveOn[index]
+                                           ? Theme.textPrimary : Theme.textSecondary
+                                }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    /* Reassigned, not mutated: a `property var`
+                                       only signals on assignment, which is what
+                                       kept the Graphs page stuck on one column
+                                       until it was fixed the same way. */
+                                    var next = window.liveOn.slice()
+                                    next[index] = !next[index]
+                                    window.liveOn = next
+                                    liveTrace.seriesVisible = window.liveSeriesVisible()
+                                }
+                            }
+                        }
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    Text {
+                        text: window.liveSamples > 0
+                              ? window.liveSamples + " samples"
+                              : "waiting for data"
+                        color: Theme.textSecondary
+                        font.pixelSize: Theme.fontSmall
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    color: Theme.background
+                    radius: Theme.radiusSmall
+                    border.color: Theme.border
+                    clip: true
+
+                    TraceView {
+                        id: liveTrace
+                        anchors.fill: parent
+                        anchors.margins: 6
+                        seriesColors: window.traceColors
+                        Component.onCompleted: {
+                            /* 600 samples at the recorder's 10/s beat is a
+                               minute of history, which is what a strip chart is
+                               for -- long enough to see a trend, short enough
+                               that the newest sample still moves the picture. */
+                            beginLive(window.channelLabels, 600)
+                            seriesVisible = window.liveSeriesVisible()
+                        }
+                    }
+
+                    Text {
+                        anchors.centerIn: parent
+                        visible: window.liveSamples === 0
+                        text: "No live data — start a recording to see the motor stream"
+                        color: Theme.textSecondary
+                        font.pixelSize: Theme.fontBody
                     }
                 }
             }

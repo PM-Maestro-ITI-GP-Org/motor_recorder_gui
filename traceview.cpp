@@ -242,8 +242,52 @@ void TraceView::loadCsvFileAsync(const QString &path)
     }).detach();
 }
 
+void TraceView::beginLive(const QStringList &columnNames, int capacity)
+{
+    ++m_loadSeq;            /* cancel any file load still in flight */
+    m_cols.clear();
+    m_headers = columnNames;
+    m_cols.resize(columnNames.size());
+    m_liveCap = qMax(2, capacity);
+    for (auto &c : m_cols)
+        c.reserve(m_liveCap + 1);
+    m_rows = 0;
+    m_xMin = 0; m_xMax = 1;
+    m_yMin = m_yMax = qQNaN();
+    emit dataChanged();
+    emit windowChanged();
+    update();
+}
+
+void TraceView::appendLiveRow(const QVariantList &values)
+{
+    if (m_liveCap <= 0 || m_cols.isEmpty())
+        return;
+
+    const int n = qMin(int(values.size()), m_cols.size());
+    for (int c = 0; c < m_cols.size(); ++c) {
+        bool ok = false;
+        const float v = (c < n) ? values[c].toFloat(&ok) : 0.0f;
+        m_cols[c].append(ok ? v : 0.0f);
+    }
+
+    /* Drop the oldest once full. remove(0) is a memmove of a few thousand
+       floats at this window size -- cheaper than the bookkeeping a ring index
+       would add to the draw loop, which runs far more often than this does. */
+    if (m_cols[0].size() > m_liveCap)
+        for (auto &c : m_cols)
+            c.remove(0);
+
+    m_rows = m_cols[0].size();
+    m_xMin = 0;
+    m_xMax = qMax(2, m_rows);
+    emit windowChanged();
+    update();
+}
+
 void TraceView::clearData()
 {
+    m_liveCap = 0;
     m_cols.clear();
     m_headers.clear();
     m_rows = 0;
