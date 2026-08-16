@@ -100,15 +100,38 @@ ApplicationWindow {
                 }
             }
         }
+        /*
+         * One message, one or more rows.
+         *
+         * The recorder samples for the live feed faster than it sends, and
+         * packs whatever accumulated into a single publish -- so the plot gets
+         * the detail without the broker getting the message count. Each row is
+         * newline-terminated, which a single-row message always was too, so
+         * this reads both.
+         *
+         * Every row goes to the plot; only the last goes to the telemetry
+         * tiles. The tiles show one instantaneous value, and writing the
+         * intermediate ones into the model would be thirteen property writes
+         * each to produce a number nobody can see at this rate.
+         */
         onDataReceived: (payload) => {
-            var parts = payload.split(',')
-            if (parts.length === 13) {
-                for (var c = 0; c < 13; ++c)
-                    dataModel.setProperty(c, "value", parts[c])
-                /* Same row into the rolling plot. It keeps floats, so the
-                   strings stop here. */
+            var lines = payload.split('\n')
+            var last = null
+            for (var i = 0; i < lines.length; ++i) {
+                if (lines[i].length === 0)
+                    continue
+                var parts = lines[i].split(',')
+                if (parts.length !== 13)
+                    continue
+                /* Into the rolling plot, which keeps floats -- the strings
+                   stop here. */
                 liveTrace.appendLiveRow(parts)
                 window.liveSamples++
+                last = parts
+            }
+            if (last !== null) {
+                for (var c = 0; c < 13; ++c)
+                    dataModel.setProperty(c, "value", last[c])
             }
         }
         onFileDownloaded: (csvData) => {
@@ -638,6 +661,14 @@ ApplicationWindow {
     property var liveOn: [true, true, false, false, false, true]
     property int liveSamples: 0
 
+    /* The live plot's current vertical extent, as text for the corner labels.
+       Kept as properties refreshed on a timer rather than bound to the plot:
+       the range moves with every sample, and re-running two number formats and
+       two text layouts fifty times a second to change a digit occasionally is
+       work for nothing. */
+    property string liveYTop: ""
+    property string liveYBottom: ""
+
     /* liveChannels/liveOn -> the per-column bool list TraceView wants. */
     function liveSeriesVisible() {
         var v = []
@@ -1094,19 +1125,86 @@ ApplicationWindow {
                     border.color: Theme.border
                     clip: true
 
+                    /* Horizontal gridlines, behind the traces.
+                       Four bands is enough to judge a level against without
+                       becoming the thing you look at, so they sit at the
+                       border's own weight and no brighter. */
+                    Repeater {
+                        model: 5
+                        delegate: Rectangle {
+                            required property int index
+                            x: 6
+                            width: parent.width - 12
+                            y: 6 + (parent.height - 12) * index / 4
+                            height: 1
+                            color: Theme.border
+                            opacity: index === 0 || index === 4 ? 0.55 : 0.3
+                        }
+                    }
+
                     TraceView {
                         id: liveTrace
                         anchors.fill: parent
                         anchors.margins: 6
                         seriesColors: window.traceColors
+                        lineWidth: 2.2
+
+                        /* Rendered into a multisampled framebuffer.
+                           The trace is drawn as scene-graph geometry, which the
+                           item's own `antialiasing` property does not reach --
+                           it applies to Qt's built-in shapes. A layer with
+                           samples > 1 does reach it, and is what turns the
+                           stepped diagonals of a rising edge into a clean one.
+                           A plot this size is a cheap thing to resolve. */
+                        layer.enabled: true
+                        layer.samples: 4
+
                         Component.onCompleted: {
-                            /* 600 samples at the recorder's 10/s beat is a
-                               minute of history, which is what a strip chart is
-                               for -- long enough to see a trend, short enough
-                               that the newest sample still moves the picture. */
-                            beginLive(window.channelLabels, 600)
+                            /* 750 samples at the recorder's 50/s live rate is
+                               fifteen seconds of history. Shorter than the
+                               minute this held before, deliberately: a minute
+                               across ~600px is one pixel per sample, so the
+                               trace could only ever crawl a pixel at a time and
+                               no extra detail would have been visible anyway.
+                               Fifteen seconds is where the motion reads as
+                               motion. */
+                            beginLive(window.channelLabels, 750)
                             seriesVisible = window.liveSeriesVisible()
                         }
+                    }
+
+                    Timer {
+                        interval: 250
+                        running: window.liveSamples > 0
+                        repeat: true
+                        onTriggered: {
+                            var b = liveTrace.visibleYBounds()
+                            if (b.length === 2) {
+                                window.liveYTop = b[1].toFixed(0)
+                                window.liveYBottom = b[0].toFixed(0)
+                            }
+                        }
+                    }
+
+                    /* Current vertical extent. The plot autoscales, so without
+                       these the trace has a shape but no magnitude. */
+                    Text {
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.margins: 8
+                        visible: window.liveSamples > 0
+                        text: window.liveYTop
+                        color: Theme.textSecondary
+                        font.pixelSize: Theme.fontTiny
+                    }
+                    Text {
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        anchors.margins: 8
+                        visible: window.liveSamples > 0
+                        text: window.liveYBottom
+                        color: Theme.textSecondary
+                        font.pixelSize: Theme.fontTiny
                     }
 
                     Text {
