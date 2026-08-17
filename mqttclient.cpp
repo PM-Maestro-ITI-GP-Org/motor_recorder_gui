@@ -45,7 +45,20 @@ static int on_message(void *context, char *topicName, int topicLen,
     QString payload = QString::fromUtf8(
         static_cast<char *>(message->payload), message->payloadlen);
 
-    fprintf(stderr, "[MQTT] << %s : %s\n", qPrintable(topic), payload.left(120).toUtf8().constData());
+    /*
+     * Stamped, because without one this line cannot answer the question it is
+     * usually being read for.
+     *
+     * This prints on Paho's delivery thread, the moment the message lands; the
+     * signal that moves the progress bar is queued to the GUI thread after it.
+     * So an un-stamped log of a stalled bar looks identical whether the sender
+     * held every message back and dumped them at the end, or they arrived
+     * evenly and the GUI thread was too busy to draw them -- opposite causes,
+     * opposite fixes. The gap between consecutive lines tells them apart.
+     */
+    fprintf(stderr, "[MQTT] %s << %s : %s\n",
+            qPrintable(QDateTime::currentDateTime().toString("hh:mm:ss.zzz")),
+            qPrintable(topic), payload.left(120).toUtf8().constData());
 
     QMetaObject::invokeMethod(ctx->self, [self = ctx->self, topic, payload]() {
         if (topic == CMD_TOPIC) {
