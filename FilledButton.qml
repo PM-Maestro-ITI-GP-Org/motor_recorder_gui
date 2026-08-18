@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import PdM.Core
 
 /*
  * A Material 3 button.
@@ -35,7 +36,7 @@ Button {
 
     /* The accent this button is drawn in. Set it to Theme.danger for a
        destructive action and every state follows. */
-    property color accent: Theme.accent
+    property color accent: Theme.primary
 
     /* Kept so existing call sites that set fill/fillHover/textColor still
        work; when fill is set it wins over the variant's container colour. */
@@ -50,7 +51,7 @@ Button {
     readonly property color _container:
           fill.a > 0            ? fill
         : _isFilled             ? accent
-        : _isTonal              ? Theme.accentSoft
+        : _isTonal              ? Theme.primarySoft
                                 : "transparent"
 
     readonly property color _label:
@@ -86,11 +87,11 @@ Button {
             radius: height / 2
             color: control.enabled ? control._container
                                    : (control._isFilled || control._isTonal
-                                      ? Theme.surfaceAlt : "transparent")
+                                      ? Theme.surfaceVariant : "transparent")
             border.width: control._isOutlined ? 1 : 0
             border.color: control.enabled ? Qt.rgba(control.accent.r, control.accent.g,
                                                     control.accent.b, 0.45)
-                                          : Theme.border
+                                          : Theme.outline
             clip: true
 
             /* State layer: the accent (or white, over a filled container) at

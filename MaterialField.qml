@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import PdM.Core
 
 /*
  * A Material 3 "filled" text field.
@@ -42,7 +43,7 @@ Item {
         /* Material's filled field: rounded top, square bottom, sitting on its
            indicator line. */
         radius: Theme.radiusSmall
-        color: input.activeFocus ? Theme.accentSoft : Theme.surfaceAlt
+        color: input.activeFocus ? Theme.primarySoft : Theme.surfaceVariant
         Behavior on color { ColorAnimation { duration: 120 } }
 
         /* Bottom indicator: thin at rest, thick and accented when focused. */
@@ -51,7 +52,7 @@ Item {
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             height: input.activeFocus ? 2 : 1
-            color: input.activeFocus ? Theme.accent : Theme.border
+            color: input.activeFocus ? Theme.primary : Theme.outline
             Behavior on height { NumberAnimation { duration: 120 } }
             Behavior on color { ColorAnimation { duration: 120 } }
         }
@@ -59,7 +60,7 @@ Item {
         Text {
             id: floatLabel
             text: root.label
-            color: input.activeFocus ? Theme.accent : Theme.textSecondary
+            color: input.activeFocus ? Theme.primary : Theme.textSecondary
             x: Theme.spacingTight + 4
             /* Raised: tucked under the top edge. Resting: vertically centred,
                where the value will appear. */

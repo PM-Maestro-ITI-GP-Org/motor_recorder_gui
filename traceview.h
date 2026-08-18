@@ -1,6 +1,7 @@
 #ifndef TRACEVIEW_H
 #define TRACEVIEW_H
 
+#include <QtQml/qqmlregistration.h>
 #include <QQuickItem>
 #include <QVector>
 #include <QStringList>
@@ -28,6 +29,13 @@
 class TraceView : public QQuickItem
 {
     Q_OBJECT
+    /* Registered into the PdM.DataCollection QML module by name, replacing the
+       qmlRegisterType() calls that used to sit in main.cpp. It has to be a
+       declaration rather than a call because Maestro never compiles this repo's
+       main.cpp -- a registration made there would simply not happen in the
+       merged build, and the type would be missing from QML with a clean
+       compile. */
+    QML_ELEMENT
 
     /* Visible row window (x axis). */
     Q_PROPERTY(qreal xMin READ xMin WRITE setXMin NOTIFY windowChanged)

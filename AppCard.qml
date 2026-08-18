@@ -1,4 +1,5 @@
 import QtQuick
+import PdM.Core
 
 /*
  * A surface with a soft shadow.
@@ -14,7 +15,7 @@ Item {
     property int  elevation: 1
     property int  padding: Theme.spacing
     property color color: Theme.surface
-    property color borderColor: Theme.border
+    property color borderColor: Theme.outline
     property int  radius: Theme.radius
 
     default property alias content: inner.data

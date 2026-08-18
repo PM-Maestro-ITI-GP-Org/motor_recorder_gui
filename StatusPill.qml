@@ -1,4 +1,5 @@
 import QtQuick
+import PdM.Core
 
 /* Small state chip: a dot and a word, coloured by tone. */
 Rectangle {
@@ -18,7 +19,7 @@ Rectangle {
         : tone === "warning"   ? Theme.warningSoft
         : tone === "danger"    ? Theme.dangerSoft
         : tone === "recording" ? Theme.recordingSoft
-                               : Theme.surfaceAlt
+                               : Theme.surfaceVariant
 
     implicitWidth: row.implicitWidth + 22
     implicitHeight: 30

@@ -1,9 +1,11 @@
 #ifndef MOTOR_GUI_MQTTCLIENT_H
 #define MOTOR_GUI_MQTTCLIENT_H
 
+#include <QtQml/qqmlregistration.h>
 #include <QObject>
 #include <QString>
 #include <QTimer>
+#include <QThread>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
@@ -28,6 +30,13 @@ struct MqttContext;
 class MqttClient : public QObject
 {
     Q_OBJECT
+    /* Registered into the PdM.DataCollection QML module by name, replacing the
+       qmlRegisterType() calls that used to sit in main.cpp. It has to be a
+       declaration rather than a call because Maestro never compiles this repo's
+       main.cpp -- a registration made there would simply not happen in the
+       merged build, and the type would be missing from QML with a clean
+       compile. */
+    QML_ELEMENT
     Q_PROPERTY(bool connected READ isConnected NOTIFY connectedChanged)
     Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged)
 
@@ -48,6 +57,11 @@ public slots:
     Q_INVOKABLE void startPipeline(const QString &url);
     Q_INVOKABLE void pickAndDownload(const QString &remoteUrl);
     void startScpProcess(const QString &remotePath, const QString &localPath);
+
+    /* The other half of connectToBroker(): everything that used to follow the
+       blocking MQTTClient_connect() call, now run back on the GUI thread once
+       the worker reports a result. */
+    void onConnectResult(int rc);
     Q_INVOKABLE void requestFileList();
     Q_INVOKABLE void downloadFile(const QString &filename);
     Q_INVOKABLE void uploadFile(const QString &filename, const QString &localSavePath);
@@ -92,6 +106,16 @@ private:
 #endif
     /* The callback context handed to Paho, kept so it can be freed. */
     MqttContext *m_ctx = nullptr;
+
+    /*
+     * The one-shot worker that runs the blocking MQTTClient_connect(), and the
+     * two flags that keep the GUI thread out of its way: m_connecting rejects a
+     * second attempt while one is in flight, and m_teardownPending records a
+     * disconnect that arrived too early to act on.
+     */
+    QThread *m_connectThread = nullptr;
+    bool m_connecting = false;
+    bool m_teardownPending = false;
     QTimer *m_cmdTimer;
     QTimer *m_yieldTimer;
     QTimer *m_reconnectTimer;

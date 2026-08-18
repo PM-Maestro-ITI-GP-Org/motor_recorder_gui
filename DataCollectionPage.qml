@@ -4,28 +4,47 @@ import QtQuick.Controls.Material
 import QtQuick.Layouts
 import QtQuick.Window
 import Qt.labs.folderlistmodel
-import MqttClient 1.0
-import App 1.0
+import PdM.Core
 
-ApplicationWindow {
+/*
+ * The data recorder, as a page.
+ *
+ * An Item and not an ApplicationWindow, because in Maestro this lives inside a
+ * tab and a tab cannot contain a window. The window that used to be here is now
+ * main.qml, which exists only for the standalone build.
+ *
+ * `id: window` is kept deliberately. Roughly a hundred bindings below say
+ * `window.liveOn`, `window.traceColors`, `window.uploadPct` and so on -- all of
+ * them referring to properties declared on this object, none to window API --
+ * so renaming the id would have meant touching a hundred lines to no effect.
+ * The name is now slightly wrong and the alternative was worse.
+ *
+ * MqttClient and TraceView need no import: they are registered into this file's
+ * own module, PdM.DataCollection, by QML_ELEMENT in their headers.
+ */
+Item {
     id: window
-    visible: true
 
-    /* Bigger by default. The old 1100x800 with 9-14px type meant the file list
-       and the graph controls were both cramped and hard to read. */
-    width: 1400
-    height: 950
-    minimumWidth: 1000
-    minimumHeight: 700
-    title: "Motor Data Recorder"
-    color: Theme.background
+    /* The window used to paint this with its `color` property; an Item has no
+       equivalent, so the page paints its own background. It also means the page
+       is opaque wherever it is placed, rather than inheriting whatever is
+       behind it in the tab stack. */
+    Rectangle {
+        anchors.fill: parent
+        color: Theme.background
+        z: -1
+    }
 
     /* Light by default, with a toggle. Material.background is deliberately NOT
-       set on the window: it propagates to every Button inside and overrides
-       their own fill, which is why FilledButton paints its own. */
+       set here: it propagates to every Button inside and overrides their own
+       fill, which is why FilledButton paints its own.
+
+       These stay on the page rather than moving to main.qml so that the page
+       renders identically whether its parent is the standalone window or
+       Maestro's tab stack. Both resolve to the same PdM.Core values. */
     Material.theme: Theme.dark ? Material.Dark : Material.Light
-    Material.accent: Theme.accent
-    Material.primary: Theme.accent
+    Material.accent: Theme.primary
+    Material.primary: Theme.primary
 
     MqttClient {
         id: mqtt
@@ -471,7 +490,7 @@ ApplicationWindow {
         y: (parent.height - height) / 3
         width: 520
         height: 460
-        background: Rectangle { color: Theme.surface; radius: 8; border.color: Theme.border; border.width: 1 }
+        background: Rectangle { color: Theme.surface; radius: 8; border.color: Theme.outline; border.width: 1 }
 
         header: Label {
             text: folderDialog.title
@@ -516,7 +535,7 @@ ApplicationWindow {
                     verticalAlignment: Text.AlignVCenter
                     placeholderText: "/path/to/folder"
                     placeholderTextColor: Theme.textSecondary
-                    background: Rectangle { color: Theme.background; radius: 4; border.color: Theme.border; border.width: 1 }
+                    background: Rectangle { color: Theme.background; radius: 4; border.color: Theme.outline; border.width: 1 }
                     onAccepted: {
                         var p = text.trim()
                         if (p === "") return
@@ -538,7 +557,7 @@ ApplicationWindow {
                         folderDialog.currentFolder = url.slice(0, idx + 1)
                     }
                     contentItem: Text { text: "\u2191"; color: Theme.textPrimary; font.bold: true; font.pixelSize: Theme.fontBody; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle { color: parent.hovered ? Theme.accent : Theme.surfaceAlt; radius: 4; border.color: Theme.border; border.width: 1 }
+                    background: Rectangle { color: parent.hovered ? Theme.primary : Theme.surfaceVariant; radius: 4; border.color: Theme.outline; border.width: 1 }
                 }
             }
 
@@ -547,7 +566,7 @@ ApplicationWindow {
                 Layout.fillHeight: true
                 color: Theme.background
                 radius: 6
-                border.color: Theme.border
+                border.color: Theme.outline
                 clip: true
 
                 ListView {
@@ -627,7 +646,7 @@ ApplicationWindow {
                         folderDialog.accept()
                     }
                     contentItem: Text { text: parent.text; color: "#ffffff"; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: Theme.fontBody }
-                    background: Rectangle { color: parent.down ? Theme.accent : parent.hovered ? Theme.success : Theme.success; radius: 6 }
+                    background: Rectangle { color: parent.down ? Theme.primary : parent.hovered ? Theme.success : Theme.success; radius: 6 }
                     implicitHeight: 34
                 }
 
@@ -636,7 +655,7 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     onClicked: folderDialog.reject()
                     contentItem: Text { text: parent.text; color: Theme.textPrimary; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: Theme.fontBody }
-                    background: Rectangle { color: parent.hovered ? Theme.accent : Theme.surfaceAlt; radius: 6; border.color: Theme.border; border.width: 1 }
+                    background: Rectangle { color: parent.hovered ? Theme.primary : Theme.surfaceVariant; radius: 6; border.color: Theme.outline; border.width: 1 }
                     implicitHeight: 34
                 }
             }
@@ -903,7 +922,7 @@ ApplicationWindow {
                 Layout.preferredHeight: 48
                 color: Theme.surface
                 radius: 8
-                border.color: Theme.border
+                border.color: Theme.outline
 
                 ColumnLayout {
                     anchors.fill: parent
@@ -956,7 +975,7 @@ ApplicationWindow {
                 FilledButton {
                     id: btnStart
                     variant: "filled"
-                    accent: Theme.accent
+                    accent: Theme.primary
                     text: "Start"
                     enabled: false
                     Layout.fillWidth: true
@@ -986,7 +1005,7 @@ ApplicationWindow {
             FilledButton {
                 id: btnDownload
                     variant: "outlined"
-                    accent: Theme.accent
+                    accent: Theme.primary
                 text: "Files"
                 enabled: false
                 Layout.fillWidth: true
@@ -997,7 +1016,7 @@ ApplicationWindow {
             FilledButton {
                 id: btnGraphs
                     variant: "outlined"
-                    accent: Theme.accent
+                    accent: Theme.primary
                 text: "Graphs"
                 enabled: false
                 Layout.fillWidth: true
@@ -1031,7 +1050,7 @@ ApplicationWindow {
             Layout.preferredHeight: 260
             color: Theme.surface
             radius: Theme.radius
-            border.color: Theme.border
+            border.color: Theme.outline
             border.width: 1
 
             ColumnLayout {
@@ -1063,11 +1082,11 @@ ApplicationWindow {
                             /* traceColors holds strings, so no .r/.g/.b here:
                                the channel colour carries on the dot and the
                                outline, and the fill stays neutral. */
-                            color: window.liveOn[index] ? Theme.accentSoft
-                                                        : Theme.surfaceAlt
+                            color: window.liveOn[index] ? Theme.primarySoft
+                                                        : Theme.surfaceVariant
                             border.width: 1
                             border.color: window.liveOn[index]
-                                          ? window.traceColors[modelData] : Theme.border
+                                          ? window.traceColors[modelData] : Theme.outline
 
                             Row {
                                 id: chipRow
@@ -1122,7 +1141,7 @@ ApplicationWindow {
                     Layout.fillHeight: true
                     color: Theme.background
                     radius: Theme.radiusSmall
-                    border.color: Theme.border
+                    border.color: Theme.outline
                     clip: true
 
                     /* Horizontal gridlines, behind the traces.
@@ -1137,7 +1156,7 @@ ApplicationWindow {
                             width: parent.width - 12
                             y: 6 + (parent.height - 12) * index / 4
                             height: 1
-                            color: Theme.border
+                            color: Theme.outline
                             opacity: index === 0 || index === 4 ? 0.55 : 0.3
                         }
                     }
@@ -1236,7 +1255,7 @@ ApplicationWindow {
             Layout.preferredHeight: 190
             color: Theme.surface
             radius: Theme.radius
-            border.color: Theme.border
+            border.color: Theme.outline
             border.width: 1
 
             ColumnLayout {
@@ -1298,7 +1317,7 @@ ApplicationWindow {
             Layout.fillHeight: true
             color: Theme.surface
             radius: 8
-            border.color: Theme.border
+            border.color: Theme.outline
             clip: true
 
             ListView {
@@ -1356,7 +1375,7 @@ ApplicationWindow {
             visible: downloadQueueActive && downloadQueue.length > 0
             color: Theme.surface
             radius: 8
-            border.color: Theme.border
+            border.color: Theme.outline
             clip: true
 
             ColumnLayout {
@@ -1415,7 +1434,7 @@ ApplicationWindow {
                             id: uploadBar
                             height: parent.height
                             width: parent.width * (window.uploadPct / 100)
-                            color: Theme.accentHover
+                            color: Theme.primaryHover
                             radius: 4
                             Behavior on width { NumberAnimation { duration: 150 } }
                         }
@@ -1424,7 +1443,7 @@ ApplicationWindow {
                     Text {
                         id: uploadLabel
                         text: "Upload 0%"
-                        color: Theme.accentHover
+                        color: Theme.primaryHover
                         font.pixelSize: Theme.fontTiny
                         font.bold: true
                         Layout.preferredWidth: 80
@@ -1498,7 +1517,7 @@ ApplicationWindow {
                 Layout.preferredHeight: 36
                 color: Theme.surface
                 radius: Theme.radiusSmall
-                border.color: Theme.border
+                border.color: Theme.outline
                 border.width: 1
                 clip: true
 
@@ -1520,8 +1539,8 @@ ApplicationWindow {
             FilledButton {
                 text: "Browse"
                 implicitHeight: 36
-                fill: Theme.surfaceAlt
-                fillHover: Theme.accentSoft
+                fill: Theme.surfaceVariant
+                fillHover: Theme.primarySoft
                 textColor: Theme.textPrimary
                 onClicked: folderDialog.open()
             }
@@ -1562,7 +1581,7 @@ ApplicationWindow {
                         implicitWidth: 70
                         onClicked: showGraph = false
                         contentItem: Text { text: parent.text; color: Theme.textPrimary; font.bold: true; font.pixelSize: Theme.fontSmall; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                        background: Rectangle { color: parent.hovered ? Theme.accent : Theme.surfaceAlt; radius: 4; border.color: Theme.border; border.width: 1 }
+                        background: Rectangle { color: parent.hovered ? Theme.primary : Theme.surfaceVariant; radius: 4; border.color: Theme.outline; border.width: 1 }
                         implicitHeight: 28
                     }
 
@@ -1577,7 +1596,7 @@ ApplicationWindow {
                             if (currentIndex >= 0)
                                 loadSelectedFile(currentIndex)
                         }
-                        background: Rectangle { color: Theme.surface; radius: 4; border.color: Theme.border; border.width: 1 }
+                        background: Rectangle { color: Theme.surface; radius: 4; border.color: Theme.outline; border.width: 1 }
                         contentItem: Text { text: graphFileCombo.currentText; color: Theme.textPrimary; x: 8; font.pixelSize: Theme.fontSmall }
                         indicator: Text { text: "\u25bc"; color: Theme.textSecondary; anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter }
                     }
@@ -1587,7 +1606,7 @@ ApplicationWindow {
                         id: graphStartField
                         implicitWidth: 70
                         color: Theme.textPrimary
-                        background: Rectangle { color: Theme.surface; radius: 4; border.color: Theme.border; border.width: 1 }
+                        background: Rectangle { color: Theme.surface; radius: 4; border.color: Theme.outline; border.width: 1 }
                         leftPadding: 6; font.pixelSize: Theme.fontSmall
                         validator: IntValidator { bottom: 0 }
                     }
@@ -1597,7 +1616,7 @@ ApplicationWindow {
                         id: graphEndField
                         implicitWidth: 70
                         color: Theme.textPrimary
-                        background: Rectangle { color: Theme.surface; radius: 4; border.color: Theme.border; border.width: 1 }
+                        background: Rectangle { color: Theme.surface; radius: 4; border.color: Theme.outline; border.width: 1 }
                         leftPadding: 6; font.pixelSize: Theme.fontSmall
                         validator: IntValidator { bottom: 0 }
                     }
@@ -1614,7 +1633,7 @@ ApplicationWindow {
                             chartCanvas.requestPaint()
                         }
                         contentItem: Text { text: parent.text; color: Theme.textPrimary; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: Theme.fontSmall }
-                        background: Rectangle { color: parent.hovered ? Theme.accent : Theme.surfaceAlt; radius: 4; border.color: Theme.border; border.width: 1 }
+                        background: Rectangle { color: parent.hovered ? Theme.primary : Theme.surfaceVariant; radius: 4; border.color: Theme.outline; border.width: 1 }
                         implicitHeight: 28
                     }
                 }
@@ -1624,7 +1643,7 @@ ApplicationWindow {
                     Layout.fillHeight: true
                     color: Theme.surface
                     radius: 6
-                    border.color: Theme.border
+                    border.color: Theme.outline
                     border.width: 1
                     clip: true
 
@@ -1797,7 +1816,7 @@ ApplicationWindow {
                             chartCanvas.viewYLo = yMin; chartCanvas.viewYHi = yMax
                             chartCanvas.viewX0 = startRow; chartCanvas.viewSpan = visibleRange
 
-                            ctx.strokeStyle = Theme.border; ctx.lineWidth = 0.5
+                            ctx.strokeStyle = Theme.outline; ctx.lineWidth = 0.5
                             var yTicks = Math.max(6, Math.min(10, Math.floor(pH / 18)))
                             var xTicks = Math.max(6, Math.min(10, Math.floor(pW / 55)))
                             function fmtTick(v) {
@@ -1862,7 +1881,7 @@ ApplicationWindow {
                         id: rubberBand
                         visible: false
                         color: "#301f6feb"
-                        border.color: Theme.accent
+                        border.color: Theme.primary
                         border.width: 1
                         z: 5
                     }
@@ -2080,7 +2099,7 @@ ApplicationWindow {
                             chartCanvas.requestPaint()
                         }
                         contentItem: Text { text: parent.text; color: Theme.textPrimary; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: Theme.fontSmall }
-                        background: Rectangle { color: parent.hovered ? Theme.accent : Theme.surfaceAlt; radius: 4; border.color: Theme.border; border.width: 1 }
+                        background: Rectangle { color: parent.hovered ? Theme.primary : Theme.surfaceVariant; radius: 4; border.color: Theme.outline; border.width: 1 }
                     }
                 }
             }
@@ -2090,7 +2109,7 @@ ApplicationWindow {
                 Layout.fillHeight: true
                 color: Theme.surface
                 radius: 6
-                border.color: Theme.border
+                border.color: Theme.outline
                 visible: csvColumns.length > 0
                 clip: true
 
@@ -2101,7 +2120,7 @@ ApplicationWindow {
 
                     Text { text: "Data Columns"; color: Theme.textPrimary; font.bold: true; font.pixelSize: Theme.fontSmall }
 
-                    Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
+                    Rectangle { Layout.fillWidth: true; height: 1; color: Theme.outline }
 
                     ListView {
                         Layout.fillWidth: true
@@ -2136,8 +2155,8 @@ ApplicationWindow {
                                     implicitWidth: 20; implicitHeight: 20
                                     x: cb.leftPadding; y: cb.height / 2 - 10
                                     radius: 4
-                                    color: cb.checked ? Theme.accent : "transparent"
-                                    border.color: cb.checked ? Theme.accent : Theme.textSecondary
+                                    color: cb.checked ? Theme.primary : "transparent"
+                                    border.color: cb.checked ? Theme.primary : Theme.textSecondary
                                     border.width: 2
                                     Text {
                                         anchors.centerIn: parent
@@ -2176,7 +2195,7 @@ ApplicationWindow {
         x: (parent.width - width) / 2
         y: (parent.height - height) / 3
         width: 380
-        background: Rectangle { color: Theme.surface; radius: 8; border.color: Theme.border; border.width: 1 }
+        background: Rectangle { color: Theme.surface; radius: 8; border.color: Theme.outline; border.width: 1 }
 
         header: Label {
             text: "Start Recording"
@@ -2267,7 +2286,7 @@ ApplicationWindow {
         y: (parent.height - height) / 3
         width: 520
         height: 460
-        background: Rectangle { color: Theme.surface; radius: 8; border.color: Theme.border; border.width: 1 }
+        background: Rectangle { color: Theme.surface; radius: 8; border.color: Theme.outline; border.width: 1 }
 
         header: Label {
             text: "Recording Files on Device"
@@ -2331,7 +2350,7 @@ ApplicationWindow {
                 Layout.fillHeight: true
                 color: Theme.background
                 radius: 6
-                border.color: Theme.border
+                border.color: Theme.outline
                 clip: true
 
                 ListView {
@@ -2372,8 +2391,8 @@ ApplicationWindow {
                                     x: itemCheck.leftPadding
                                     y: itemCheck.height / 2 - height / 2
                                     radius: 4
-                                    color: itemCheck.checked ? Theme.accent : "transparent"
-                                    border.color: itemCheck.checked ? Theme.accent
+                                    color: itemCheck.checked ? Theme.primary : "transparent"
+                                    border.color: itemCheck.checked ? Theme.primary
                                                                     : Theme.textSecondary
                                     border.width: 2
                                     Behavior on color { ColorAnimation { duration: 100 } }
@@ -2425,7 +2444,7 @@ ApplicationWindow {
                 FilledButton {
                     text: "Download Selected"
                     variant: "filled"
-                    accent: Theme.accent
+                    accent: Theme.primary
                     Layout.fillWidth: true
                     enabled: {
                         var c = 0

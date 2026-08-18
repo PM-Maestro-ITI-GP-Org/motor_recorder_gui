@@ -165,6 +165,14 @@ void MqttClient::teardownClient()
 
 MqttClient::~MqttClient()
 {
+    /* A connect can still be in flight at shutdown, and it holds the handle
+       teardownClient() is about to destroy. This is the one place that really
+       does wait for it. */
+    if (m_connectThread) {
+        m_connectThread->wait();
+        delete m_connectThread;
+        m_connectThread = nullptr;
+    }
     teardownClient();
 }
 
@@ -197,6 +205,12 @@ void MqttClient::setStatusText(const QString &t)
 void MqttClient::connectToBroker()
 {
 #ifdef HAVE_MQTT
+    /* Reconnect timers and an impatient user can both land here while a connect
+       is already in flight; a second MQTTClient_create() would strand the
+       handle the worker is holding. */
+    if (m_connecting)
+        return;
+
     m_reconnectTimer->stop();
     setStatusText("Connecting...");
     fprintf(stderr, "[GUI] Connecting to MQTT broker %s...\n", MQTT_BROKER);
@@ -232,7 +246,65 @@ void MqttClient::connectToBroker()
 
     MQTTClient_setCallbacks(m_client, ctx, on_connection_lost, on_message, nullptr);
 
-    rc = MQTTClient_connect(m_client, &ctx->opts);
+    /*
+     * MQTTClient_connect() is Paho's *synchronous* API and blocks for up to
+     * connectTimeout -- five seconds above -- so calling it here froze the
+     * window for as long as the broker took to answer, or to not answer.
+     *
+     * That was survivable while this was its own process. Inside Maestro it is
+     * not: one event loop is shared with the other tabs, so a stalled connect
+     * freezes an OTA transfer and everything else along with it. Rule 8 of the
+     * integration contract exists because of this call.
+     *
+     * Only the blocking call moves. The client handle is created, configured
+     * and torn down on the GUI thread as before, and everything that used to
+     * follow this line now runs in onConnectResult(). The two never touch the
+     * handle at the same time: the yield timer is stopped until a connection
+     * succeeds, and a disconnect arriving mid-connect is deferred rather than
+     * destroying the client under the worker.
+     */
+    m_connecting = true;
+
+    MQTTClient client = m_client;
+    MQTTClient_connectOptions *opts = &ctx->opts;
+
+    m_connectThread = QThread::create([this, client, opts]() {
+        const int rc = MQTTClient_connect(client, opts);
+        QMetaObject::invokeMethod(this, [this, rc]() { onConnectResult(rc); },
+                                  Qt::QueuedConnection);
+    });
+    m_connectThread->start();
+#else
+    setStatusText("Demo mode");
+    emit logMessage("MQTT not available — running in demo mode.", "warning");
+#endif
+}
+
+void MqttClient::onConnectResult(int rc)
+{
+#ifdef HAVE_MQTT
+    m_connecting = false;
+
+    /* The worker has already handed its result over by the time this runs, so
+       the wait returns immediately; it is here to make the join explicit rather
+       than to block. */
+    if (m_connectThread) {
+        m_connectThread->wait();
+        delete m_connectThread;
+        m_connectThread = nullptr;
+    }
+
+    /* A disconnect that arrived while the connect was in flight was deferred by
+       disconnectFromBroker() instead of destroying the handle the worker was
+       still using. Honour it now. */
+    if (m_teardownPending) {
+        m_teardownPending = false;
+        teardownClient();
+        setConnected(false);
+        setStatusText("Disconnected");
+        return;
+    }
+
     if (rc == MQTTCLIENT_SUCCESS) {
         MQTTClient_subscribe(m_client, STATUS_TOPIC, 0);
         MQTTClient_subscribe(m_client, DATA_TOPIC, 0);
@@ -255,8 +327,7 @@ void MqttClient::connectToBroker()
         scheduleReconnect();
     }
 #else
-    setStatusText("Demo mode");
-    emit logMessage("MQTT not available — running in demo mode.", "warning");
+    Q_UNUSED(rc)
 #endif
 }
 
@@ -265,7 +336,13 @@ void MqttClient::disconnectFromBroker()
     m_yieldTimer->stop();
     m_reconnectTimer->stop();
     m_reconnectAttempts = 0;
-    teardownClient();
+    if (m_connecting) {
+        /* Deferred to onConnectResult(); tearing the client down here would
+           free it while the worker thread is still inside MQTTClient_connect. */
+        m_teardownPending = true;
+    } else {
+        teardownClient();
+    }
     clearPendingCmd();
     setConnected(false);
     setStatusText("Disconnected");
