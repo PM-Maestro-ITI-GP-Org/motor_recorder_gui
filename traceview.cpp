@@ -10,6 +10,9 @@
 #include <thread>
 #include <functional>
 
+namespace PdM {
+namespace DataCollection {
+
 TraceView::TraceView(QQuickItem *parent) : QQuickItem(parent)
 {
     setFlag(ItemHasContents, true);
@@ -620,3 +623,6 @@ QSGNode *TraceView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
 
     return root;
 }
+
+} // namespace DataCollection
+} // namespace PdM

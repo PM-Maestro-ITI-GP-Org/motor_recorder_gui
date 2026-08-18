@@ -26,6 +26,9 @@
  * zoom window rebuilds vertex positions for at most one point per horizontal
  * pixel and touches no strings at all.
  */
+namespace PdM {
+namespace DataCollection {
+
 class TraceView : public QQuickItem
 {
     Q_OBJECT
@@ -182,5 +185,9 @@ private:
     void resolveY(float &lo, float &hi) const;
     void updateLiveYRange();
 };
+
+
+} // namespace DataCollection
+} // namespace PdM
 
 #endif

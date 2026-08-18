@@ -22,6 +22,16 @@
 #include <MQTTClient.h>
 #endif
 
+/*
+ * Namespaced because motor_recorder_gui and ota_update_gui both define a class
+ * called MqttClient, and in Maestro both are linked into one binary. Left in
+ * the global namespace they collide at link time -- "multiple definition of
+ * MqttClient::publishCommand" -- a link error rather than anything subtle, but
+ * one that only appears once a second app is integrated.
+ */
+namespace PdM {
+namespace DataCollection {
+
 /* Holds the Paho callback context. Defined in the .cpp; the client has to keep
    a handle on it because Paho does not own it and every reconnect used to
    allocate a fresh one and drop the last. */
@@ -141,5 +151,8 @@ public:
        can forget one of the three. */
     void teardownClient();
 };
+
+} // namespace DataCollection
+} // namespace PdM
 
 #endif

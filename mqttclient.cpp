@@ -15,6 +15,9 @@
 
 #ifdef HAVE_MQTT
 
+namespace PdM {
+namespace DataCollection {
+
 struct MqttContext {
     MqttClient *self;
     QString clientId;
@@ -765,3 +768,6 @@ void MqttClient::httpDownload(const QString &url)
             emit logMessage(QString("Download %1/%2 KB").arg(recv / 1024).arg(total / 1024), "info");
     });
 }
+
+} // namespace DataCollection
+} // namespace PdM
