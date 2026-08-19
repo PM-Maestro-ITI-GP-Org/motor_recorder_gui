@@ -326,6 +326,72 @@ Item {
     property string metaBlockDrops: ""
     property string metaStalled: ""
 
+    /*
+     * Recording, driven either by the buttons on this page or by another tab.
+     *
+     * Motor Control publishes recording.start before it runs a scripted profile
+     * and recording.stop when the board reports the run finished, so a scenario
+     * and its telemetry begin and end together. Neither app names the other --
+     * they meet on a topic in PdM.Core, which is what keeps both of them
+     * buildable on their own.
+     */
+    function beginRecording(name, dur) {
+        mqtt.startRecording(name, dur)
+
+        recTimerRunning = true
+        recordingSecs = 0
+
+        if (dur > 0) {
+            startRemainingSecs = dur
+            autoStopTimer.start()
+        }
+
+        statusText.text = "Starting recording..."
+        btnStart.enabled = false
+        btnStop.enabled = true
+        btnConnect.enabled = false
+    }
+
+    function endRecording() {
+        mqtt.publishCommand("stop")
+        recTimerRunning = false
+        recordingSecs = 0
+        startRemainingSecs = 0
+        autoStopTimer.stop()
+        enableButtons("stopped")
+    }
+
+    BusSubscription {
+        topic: "recording.start"
+        onReceived: (payload) => {
+            if (!mqtt.connected) {
+                logAppend("Remote recording request ignored — not connected to the broker.",
+                          "error")
+                return
+            }
+            if (recTimerRunning) {
+                logAppend("Remote recording request ignored — already recording.", "warning")
+                return
+            }
+            logAppend("Recording started by " + (payload.source || "another tab")
+                      + ": " + payload.name, "info")
+            beginRecording(payload.name || "run", payload.seconds || 0)
+        }
+    }
+
+    BusSubscription {
+        topic: "recording.stop"
+        onReceived: (payload) => {
+            if (!recTimerRunning)
+                return
+            endRecording()
+            logAppend(payload.completed
+                      ? "Recording stopped — the run completed."
+                      : "Recording stopped — the run was aborted, discard this file.",
+                      payload.completed ? "success" : "error")
+        }
+    }
+
     function formatFileSize(bytes) {
         if (bytes < 1024) return bytes + " B"
         if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB"
@@ -992,12 +1058,7 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 48
                 onClicked: {
-                    mqtt.publishCommand("stop")
-                    recTimerRunning = false
-                    recordingSecs = 0
-                    startRemainingSecs = 0
-                    autoStopTimer.stop()
-                    enableButtons("stopped")
+                    endRecording()
                     logAppend("Sent STOP command.", "info")
                 }
             }
@@ -2229,20 +2290,8 @@ Item {
             var dur = parseInt(startDurationField.text)
             if (isNaN(dur) || dur < 0) dur = 0
 
-            mqtt.startRecording(name, dur)
+            beginRecording(name, dur)
 
-            recTimerRunning = true
-            recordingSecs = 0
-
-            if (dur > 0) {
-                startRemainingSecs = dur
-                autoStopTimer.start()
-            }
-
-            statusText.text = "Starting recording..."
-            btnStart.enabled = false
-            btnStop.enabled = true
-            btnConnect.enabled = false
             startNameField.text = ""
             startDurationField.text = "0"
         }
